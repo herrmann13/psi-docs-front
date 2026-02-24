@@ -21,12 +21,25 @@ export default function usePatients() {
     return nextPatient;
   }, []);
 
+  const updatePatient = useCallback((id, data) => {
+    let updatedPatient = null;
+    setPatients((current) =>
+      current.map((patient) => {
+        if (patient.id !== id) return patient;
+        updatedPatient = { ...patient, ...data, id: patient.id };
+        return updatedPatient;
+      })
+    );
+    return updatedPatient;
+  }, []);
+
   const value = useMemo(
     () => ({
       patients,
       addPatient,
+      updatePatient,
     }),
-    [patients, addPatient]
+    [patients, addPatient, updatePatient]
   );
 
   return value;

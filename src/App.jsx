@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, useNavigate, useLocation, Link } from "react-router-dom"
 import PatientListView from "./pages/PatientListView"
 import PatientRegistrationView from "./pages/PatientRegistrationView"
+import PatientDetailView from "./pages/PatientDetailView"
 
 function TopBar(){
   const navigate = useNavigate();
@@ -50,6 +51,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<PatientListView />} />
         <Route path="/patient/register" element={<PatientRegistrationView />} />
+        <Route path="/patient/:id" element={<PatientDetailView />} />
+        <Route path="/patient/:id/edit" element={<PatientRegistrationView />} />
       </Routes>
     </BrowserRouter>
   )

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import usePatients from "../hooks/usePatients";
 
 const INITIAL_FORM = {
@@ -55,8 +55,21 @@ const formatPhone = (value) => {
 
 export default function PatientRegistrationView() {
   const navigate = useNavigate();
-  const { addPatient } = usePatients();
+  const { id } = useParams();
+  const { addPatient, updatePatient, patients } = usePatients();
   const [form, setForm] = useState(INITIAL_FORM);
+  const isEditing = Boolean(id);
+
+  const existingPatient = useMemo(
+    () => patients.find((patient) => patient.id === id),
+    [patients, id]
+  );
+
+  useEffect(() => {
+    if (isEditing && existingPatient) {
+      setForm({ ...INITIAL_FORM, ...existingPatient });
+    }
+  }, [isEditing, existingPatient]);
 
   const canSave = useMemo(() => form.name.trim().length > 0, [form.name]);
 
@@ -76,13 +89,20 @@ export default function PatientRegistrationView() {
     const trimmedName = form.name.trim();
     if (!trimmedName) return;
 
-    addPatient({
+    const payload = {
       ...form,
       name: trimmedName,
       cpf: form.cpf.trim(),
       phone: form.phone.trim(),
-    });
+    };
 
+    if (isEditing && existingPatient) {
+      updatePatient(existingPatient.id, payload);
+      navigate(`/patient/${existingPatient.id}`);
+      return;
+    }
+
+    addPatient(payload);
     setForm(INITIAL_FORM);
     navigate("/");
   };
@@ -93,7 +113,7 @@ export default function PatientRegistrationView() {
         <div className="rounded-xl bg-white p-6 shadow-sm sm:p-8">
           <header className="mb-6">
             <h1 className="text-medium font-semibold uppercase tracking-wide text-slate-900">
-              Cadastro de paciente
+              {isEditing ? "Editar paciente" : "Cadastro de paciente"}
             </h1>
           </header>
 
@@ -272,7 +292,7 @@ export default function PatientRegistrationView() {
               disabled={!canSave}
               className="mt-2 w-full rounded-lg bg-slate-900 py-3 text-base font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Salvar paciente
+              {isEditing ? "Salvar alteracoes" : "Salvar paciente"}
             </button>
           </form>
         </div>
