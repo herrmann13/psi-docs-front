@@ -26,3 +26,15 @@ Este projeto foi desenvolvido utilizando as seguintes tecnologias:
 
 * **[React](https://reactjs.org/)** - Biblioteca para construção da interface.
 * **[Vite](https://vitejs.dev/)** - Build tool para desenvolvimento rápido.
+
+## Como Executar (Bun)
+
+```bash
+bun install
+bun run dev
+```
+
+## Autenticação (Em Andamento)
+
+- O estado de autenticação é centralizado em `src/contexts/AuthContext.jsx`.
+- O token da aplicação será persistido em `localStorage` após o login via backend.

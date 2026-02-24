@@ -1,23 +1,17 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const PATIENTS = [
-  { id: 1, name: "Maria Silva", cpf: "123.456.789-00", phone: "(11) 99999-1111" },
-  { id: 2, name: "João Pereira", cpf: "987.654.321-00", phone: "(21) 98888-2222" },
-  { id: 3, name: "Ana Costa", cpf: "456.789.123-00", phone: "(31) 97777-3333" },
-  { id: 4, name: "Pedro Santos", cpf: "741.852.963-00", phone: "(41) 96666-4444" },
-  { id: 5, name: "Carla Souza", cpf: "369.258.147-00", phone: "(51) 95555-5555" },
-]
+import usePatients from "../hooks/usePatients";
 
 export default function PatientListView() {
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
+  const { patients } = usePatients();
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
-    if (!term) return PATIENTS
-    return PATIENTS.filter((patient) => patient.name.toLowerCase().includes(term))
-  }, [search]);
+    if (!term) return patients
+    return patients.filter((patient) => (patient.name || "").toLowerCase().includes(term))
+  }, [search, patients]);
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 sm:px-8 sm:py-10">
@@ -66,17 +60,17 @@ export default function PatientListView() {
 
                 <div className="divide-y divide-slate-200">
                     {filtered.map((patient) => (
-                    <div
-                        key={patient.id}
-                        className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0"
-                    >
-                        <div>
-                        <p className="text-base font-semibold text-slate-900">{patient.name}</p>
-                        <p className="text-sm text-slate-500">CPF {patient.cpf}</p>
-                        </div>
-                        <p className="text-sm text-slate-600">{patient.phone}</p>
-                    </div>
-                    ))}
+                     <div
+                         key={patient.id}
+                         className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0"
+                     >
+                         <div>
+                        <p className="text-base font-semibold text-slate-900">{patient.name || "Sem nome"}</p>
+                        <p className="text-sm text-slate-500">CPF {patient.cpf || "-"}</p>
+                          </div>
+                         <p className="text-sm text-slate-600">{patient.phone || "-"}</p>
+                     </div>
+                     ))}
 
                     {filtered.length === 0 && (
                     <div className="py-6 text-center text-sm text-slate-500">
