@@ -33,13 +33,35 @@ export default function usePatients() {
     return updatedPatient;
   }, []);
 
+  const mergePatients = useCallback((incoming) => {
+    if (!Array.isArray(incoming)) return;
+
+    setPatients((current) => {
+      const map = new Map();
+      current.forEach((patient) => {
+        if (!patient || typeof patient !== "object") return;
+        map.set(patient.id, patient);
+      });
+
+      incoming.forEach((patient) => {
+        if (!patient || typeof patient !== "object") return;
+        const patientId = patient.id || createId();
+        const existing = map.get(patientId) || {};
+        map.set(patientId, { ...existing, ...patient, id: patientId });
+      });
+
+      return Array.from(map.values());
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       patients,
       addPatient,
       updatePatient,
+      mergePatients,
     }),
-    [patients, addPatient, updatePatient]
+    [patients, addPatient, updatePatient, mergePatients]
   );
 
   return value;

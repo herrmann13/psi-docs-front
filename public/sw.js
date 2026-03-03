@@ -1,6 +1,8 @@
+const CACHE_NAME = 'psi-docs-cache-v2'
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open('psi-docs-cache-v1').then((cache) =>
+    caches.open(CACHE_NAME).then((cache) =>
       cache.addAll(['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'])
     )
   )
@@ -12,7 +14,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== 'psi-docs-cache-v1')
+          .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       )
     )
@@ -29,7 +31,7 @@ self.addEventListener('fetch', (event) => {
       return fetch(event.request)
         .then((response) => {
           const responseClone = response.clone()
-          caches.open('psi-docs-cache-v1').then((cache) => {
+          caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone)
           })
           return response
@@ -37,4 +39,10 @@ self.addEventListener('fetch', (event) => {
         .catch(() => caches.match('/'))
     })
   )
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
 })
