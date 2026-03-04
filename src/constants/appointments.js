@@ -1,0 +1,7 @@
+export const APPOINTMENT_STATUSES = [
+  "SCHEDULED",
+  "CONFIRMED",
+  "COMPLETED",
+  "CANCELLED",
+  "NO_SHOW",
+];

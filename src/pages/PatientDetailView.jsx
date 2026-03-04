@@ -155,12 +155,24 @@ function PhoneDetailRow({ label, value }) {
 export default function PatientDetailView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { patients } = usePatients();
+  const { patients, isLoading } = usePatients();
 
   const patient = useMemo(
-    () => patients.find((item) => item.id === id),
+    () => patients.find((item) => String(item.id) === String(id)),
     [patients, id]
   );
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-10">
+        <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+          <div className="rounded-xl bg-white p-6 shadow-sm sm:p-8">
+            <p className="text-sm text-slate-500">Carregando paciente...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!patient) {
     return (

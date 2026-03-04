@@ -12,10 +12,7 @@ const INITIAL_FORM = {
   addressNeighborhood: "",
   addressCity: "",
   addressState: "",
-  emergencyContact1Name: "",
-  emergencyContact1Phone: "",
-  emergencyContact2Name: "",
-  emergencyContact2Phone: "",
+  emergencyContacts: [],
 };
 
 const digitsOnly = (value) => value.replace(/\D/g, "");
@@ -61,13 +58,32 @@ export default function PatientRegistrationView() {
   const isEditing = Boolean(id);
 
   const existingPatient = useMemo(
-    () => patients.find((patient) => patient.id === id),
+    () => patients.find((patient) => String(patient.id) === String(id)),
     [patients, id]
   );
 
   useEffect(() => {
     if (isEditing && existingPatient) {
-      setForm({ ...INITIAL_FORM, ...existingPatient });
+      const contactsFromApi = Array.isArray(existingPatient.emergencyContacts)
+        ? existingPatient.emergencyContacts
+        : [];
+      const legacyContacts = [
+        {
+          name: existingPatient.emergencyContact1Name,
+          phone: existingPatient.emergencyContact1Phone,
+        },
+        {
+          name: existingPatient.emergencyContact2Name,
+          phone: existingPatient.emergencyContact2Phone,
+        },
+      ].filter((contact) => contact.name || contact.phone);
+
+      setForm({
+        ...INITIAL_FORM,
+        ...existingPatient,
+        emergencyContacts:
+          contactsFromApi.length > 0 ? contactsFromApi : legacyContacts,
+      });
     }
   }, [isEditing, existingPatient]);
 
@@ -83,28 +99,74 @@ export default function PatientRegistrationView() {
     setForm((current) => ({ ...current, [field]: formatter(value) }));
   };
 
-  const handleSubmit = (event) => {
+  const handleContactChange = (index, field) => (event) => {
+    const { value } = event.target;
+    setForm((current) => {
+      const nextContacts = current.emergencyContacts.map((contact, idx) =>
+        idx === index ? { ...contact, [field]: value } : contact
+      );
+      return { ...current, emergencyContacts: nextContacts };
+    });
+  };
+
+  const handleContactPhoneChange = (index) => (event) => {
+    const { value } = event.target;
+    setForm((current) => {
+      const nextContacts = current.emergencyContacts.map((contact, idx) =>
+        idx === index ? { ...contact, phone: formatPhone(value) } : contact
+      );
+      return { ...current, emergencyContacts: nextContacts };
+    });
+  };
+
+  const addEmergencyContact = () => {
+    setForm((current) => ({
+      ...current,
+      emergencyContacts: [...current.emergencyContacts, { name: "", phone: "" }],
+    }));
+  };
+
+  const removeEmergencyContact = (index) => {
+    setForm((current) => ({
+      ...current,
+      emergencyContacts: current.emergencyContacts.filter((_, idx) => idx !== index),
+    }));
+  };
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     const trimmedName = form.name.trim();
     if (!trimmedName) return;
+
+    const sanitizedContacts = form.emergencyContacts
+      .map((contact) => ({
+        name: contact.name?.trim() || "",
+        phone: contact.phone?.trim() || "",
+      }))
+      .filter((contact) => contact.name || contact.phone);
 
     const payload = {
       ...form,
       name: trimmedName,
       cpf: form.cpf.trim(),
       phone: form.phone.trim(),
+      emergencyContacts: sanitizedContacts,
     };
 
-    if (isEditing && existingPatient) {
-      updatePatient(existingPatient.id, payload);
-      navigate(`/patient/${existingPatient.id}`);
-      return;
-    }
+    try {
+      if (isEditing && existingPatient) {
+        await updatePatient(existingPatient.id, payload);
+        navigate(`/patient/${existingPatient.id}`);
+        return;
+      }
 
-    addPatient(payload);
-    setForm(INITIAL_FORM);
-    navigate("/");
+      await addPatient(payload);
+      setForm(INITIAL_FORM);
+      navigate("/");
+    } catch (err) {
+      window.alert(err.message || "Erro ao salvar paciente.");
+    }
   };
 
   return (
@@ -241,50 +303,64 @@ export default function PatientRegistrationView() {
 
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Contato de Emergência 1
-              </label>
-              <input
-                type="text"
-                value={form.emergencyContact1Name}
-                onChange={handleChange("emergencyContact1Name")}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                placeholder="Descrição"
-                autoComplete="off"
-              />
-              <input
-                type="tel"
-                inputMode="tel"
-                value={form.emergencyContact1Phone}
-                onChange={handleMaskedChange("emergencyContact1Phone", formatPhone)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                placeholder="Telefone"
-                autoComplete="tel"
-              />
-            </div>
+            <div className="rounded-lg border border-slate-200 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <label className="text-sm font-semibold text-slate-700">
+                  Contatos de emergência
+                </label>
+                <button
+                  type="button"
+                  onClick={addEmergencyContact}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Adicionar contato
+                </button>
+              </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Contato de Emergência 2
-              </label>
-              <input
-                type="text"
-                value={form.emergencyContact2Name}
-                onChange={handleChange("emergencyContact2Name")}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                placeholder="Descrição"
-                autoComplete="off"
-              />
-              <input
-                type="tel"
-                inputMode="tel"
-                value={form.emergencyContact2Phone}
-                onChange={handleMaskedChange("emergencyContact2Phone", formatPhone)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                placeholder="Telefone"
-                autoComplete="tel"
-              />
+              {form.emergencyContacts.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">
+                  Nenhum contato adicionado.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-4">
+                  {form.emergencyContacts.map((contact, index) => (
+                    <div
+                      key={`contact-${index}`}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Contato {index + 1}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => removeEmergencyContact(index)}
+                          className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={contact.name || ""}
+                        onChange={handleContactChange(index, "name")}
+                        className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                        placeholder="Nome"
+                        autoComplete="off"
+                      />
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={contact.phone || ""}
+                        onChange={handleContactPhoneChange(index)}
+                        className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                        placeholder="Telefone"
+                        autoComplete="tel"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <button

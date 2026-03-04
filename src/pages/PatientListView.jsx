@@ -41,27 +41,34 @@ export default function PatientListView() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
+      let parsed;
       try {
-        const parsed = JSON.parse(reader.result);
-        const items = Array.isArray(parsed)
-          ? parsed
-          : Array.isArray(parsed?.patients)
-          ? parsed.patients
-          : [];
-
-        const sanitized = items.filter(
-          (item) => item && typeof item === "object" && (item.name || item.cpf)
-        );
-
-        if (sanitized.length === 0) {
-          window.alert("Arquivo invalido: nenhum paciente valido encontrado.");
-          return;
-        }
-
-        mergePatients(sanitized);
+        parsed = JSON.parse(reader.result);
       } catch {
         window.alert("Arquivo invalido: JSON mal formatado.");
+        return;
+      }
+
+      const items = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.patients)
+        ? parsed.patients
+        : [];
+
+      const sanitized = items.filter(
+        (item) => item && typeof item === "object" && (item.name || item.cpf)
+      );
+
+      if (sanitized.length === 0) {
+        window.alert("Arquivo invalido: nenhum paciente valido encontrado.");
+        return;
+      }
+
+      try {
+        await mergePatients(sanitized);
+      } catch (err) {
+        window.alert(err.message || "Erro ao importar pacientes.");
       }
     };
     reader.readAsText(file);

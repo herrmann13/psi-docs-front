@@ -1,58 +1,154 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadPatients, savePatients } from "../storage/patients";
+import { loadPatientsCache, savePatientsCache } from "../storage/patients";
+import { patientsService } from "../services/api/patients";
 
-function createId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `patient-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+const normalizeEmergencyContacts = (patient, cached) => {
+  const contacts = Array.isArray(patient.emergencyContacts)
+    ? patient.emergencyContacts
+    : [];
+  const contact1 = contacts[0] || {};
+  const contact2 = contacts[1] || {};
+
+  return {
+    emergencyContact1Name:
+      contact1.name || cached?.emergencyContact1Name || "",
+    emergencyContact1Phone:
+      contact1.phone || cached?.emergencyContact1Phone || "",
+    emergencyContact2Name:
+      contact2.name || cached?.emergencyContact2Name || "",
+    emergencyContact2Phone:
+      contact2.phone || cached?.emergencyContact2Phone || "",
+  };
+};
+
+const normalizePatient = (patient, cached) => {
+  if (!patient || typeof patient !== "object") return cached || {};
+  const base = {
+    ...cached,
+    ...patient,
+    name: patient.fullName || patient.name || cached?.name || "",
+  };
+
+  return {
+    ...base,
+    ...normalizeEmergencyContacts(patient, cached),
+    addressStreet: patient.addressStreet || cached?.addressStreet || "",
+    addressNumber: patient.addressNumber || cached?.addressNumber || "",
+    addressNeighborhood: patient.addressNeighborhood || cached?.addressNeighborhood || "",
+    addressCity: patient.addressCity || cached?.addressCity || "",
+    addressState: patient.addressState || cached?.addressState || "",
+  };
+};
+
+const buildPayload = (data = {}) => ({
+  fullName: data.name || data.fullName || "",
+  cpf: data.cpf || "",
+  birthDate: data.birthDate || null,
+  phone: data.phone || "",
+});
 
 export default function usePatients() {
-  const [patients, setPatients] = useState(() => loadPatients());
+  const cached = loadPatientsCache();
+  const [patients, setPatients] = useState(() => cached.patients || []);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
+  const [error, setError] = useState("");
+
+  const refreshPatients = useCallback(async () => {
+    setIsLoading(true);
+    setError("");
+    try {
+      const data = await patientsService.list();
+      const latestCache = loadPatientsCache();
+      const cachedById = new Map(
+        (latestCache.patients || []).map((patient) => [String(patient.id), patient])
+      );
+      const normalized = Array.isArray(data)
+        ? data.map((patient) =>
+            normalizePatient(patient, cachedById.get(String(patient.id)))
+          )
+        : [];
+      setPatients(normalized);
+      savePatientsCache(normalized);
+      setIsOffline(false);
+    } catch (err) {
+      setError(err.message || "Erro ao carregar pacientes.");
+      setIsOffline(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    savePatients(patients);
-  }, [patients]);
+    refreshPatients();
+  }, [refreshPatients]);
 
-  const addPatient = useCallback((data) => {
-    const nextPatient = { id: createId(), ...data };
-    setPatients((current) => [nextPatient, ...current]);
-    return nextPatient;
-  }, []);
+  const addPatient = useCallback(
+    async (data) => {
+      setError("");
+      const payload = buildPayload(data);
+      try {
+        const created = await patientsService.create(payload);
+        const normalized = normalizePatient(created, data);
+        setPatients((current) => {
+          const next = [normalized, ...current];
+          savePatientsCache(next);
+          return next;
+        });
+        return normalized;
+      } catch (err) {
+        setError(err.message || "Erro ao criar paciente.");
+        throw err;
+      }
+    },
+    []
+  );
 
-  const updatePatient = useCallback((id, data) => {
-    let updatedPatient = null;
-    setPatients((current) =>
-      current.map((patient) => {
-        if (patient.id !== id) return patient;
-        updatedPatient = { ...patient, ...data, id: patient.id };
-        return updatedPatient;
-      })
-    );
-    return updatedPatient;
-  }, []);
+  const updatePatient = useCallback(
+    async (id, data) => {
+      setError("");
+      const payload = buildPayload(data);
+      try {
+        const updated = await patientsService.update(id, payload);
+        const normalized = normalizePatient(updated, data);
+        setPatients((current) => {
+          const next = current.map((patient) =>
+            String(patient.id) === String(id) ? normalized : patient
+          );
+          savePatientsCache(next);
+          return next;
+        });
+        return normalized;
+      } catch (err) {
+        setError(err.message || "Erro ao atualizar paciente.");
+        throw err;
+      }
+    },
+    []
+  );
 
-  const mergePatients = useCallback((incoming) => {
-    if (!Array.isArray(incoming)) return;
-
-    setPatients((current) => {
-      const map = new Map();
-      current.forEach((patient) => {
-        if (!patient || typeof patient !== "object") return;
-        map.set(patient.id, patient);
-      });
-
-      incoming.forEach((patient) => {
-        if (!patient || typeof patient !== "object") return;
-        const patientId = patient.id || createId();
-        const existing = map.get(patientId) || {};
-        map.set(patientId, { ...existing, ...patient, id: patientId });
-      });
-
-      return Array.from(map.values());
-    });
-  }, []);
+  const mergePatients = useCallback(
+    async (incoming) => {
+      if (!Array.isArray(incoming) || incoming.length === 0) return;
+      setError("");
+      try {
+        await Promise.all(
+          incoming.map((patient) => {
+            const payload = buildPayload(patient);
+            if (patient.id) {
+              return patientsService.update(patient.id, payload);
+            }
+            return patientsService.create(payload);
+          })
+        );
+        await refreshPatients();
+      } catch (err) {
+        setError(err.message || "Erro ao importar pacientes.");
+        throw err;
+      }
+    },
+    [refreshPatients]
+  );
 
   const value = useMemo(
     () => ({
@@ -60,8 +156,12 @@ export default function usePatients() {
       addPatient,
       updatePatient,
       mergePatients,
+      isLoading,
+      isOffline,
+      error,
+      refreshPatients,
     }),
-    [patients, addPatient, updatePatient, mergePatients]
+    [patients, addPatient, updatePatient, mergePatients, isLoading, isOffline, error, refreshPatients]
   );
 
   return value;

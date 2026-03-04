@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation, Link } from "re
 import PatientListView from "./pages/PatientListView"
 import PatientRegistrationView from "./pages/PatientRegistrationView"
 import PatientDetailView from "./pages/PatientDetailView"
+import AppointmentsView from "./pages/AppointmentsView"
+import FinanceView from "./pages/FinanceView"
 
 function TopBar(){
   const navigate = useNavigate();
@@ -15,6 +17,10 @@ function TopBar(){
       navigate("/", { replace: true });
     }
   };
+
+  const isPatientsRoute = location.pathname === "/" || location.pathname.startsWith("/patient");
+  const isAppointmentsRoute = location.pathname.startsWith("/appointments");
+  const isFinanceRoute = location.pathname.startsWith("/finance");
 
   return(
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
@@ -33,9 +39,35 @@ function TopBar(){
             <div className="flex items-center gap-2">
               <Link
                 to="/"
-                className="rounded-md px-3 py-1 text-sm font-semibold text-slate-700 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                className={`rounded-md px-3 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                  isPatientsRoute
+                    ? "bg-slate-100 text-slate-900"
+                    : "text-slate-700 hover:text-slate-900"
+                }`}
               >
                 Pacientes
+              </Link>
+
+              <Link
+                to="/appointments"
+                className={`rounded-md px-3 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                  isAppointmentsRoute
+                    ? "bg-slate-100 text-slate-900"
+                    : "text-slate-700 hover:text-slate-900"
+                }`}
+              >
+                Agenda
+              </Link>
+
+              <Link
+                to="/finance"
+                className={`rounded-md px-3 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                  isFinanceRoute
+                    ? "bg-slate-100 text-slate-900"
+                    : "text-slate-700 hover:text-slate-900"
+                }`}
+              >
+                Financeiro
               </Link>
 
             </div>
@@ -53,6 +85,8 @@ export default function App() {
         <Route path="/patient/register" element={<PatientRegistrationView />} />
         <Route path="/patient/:id" element={<PatientDetailView />} />
         <Route path="/patient/:id/edit" element={<PatientRegistrationView />} />
+        <Route path="/appointments" element={<AppointmentsView />} />
+        <Route path="/finance" element={<FinanceView />} />
       </Routes>
     </BrowserRouter>
   )
