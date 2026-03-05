@@ -1,13 +1,16 @@
-import { BrowserRouter, Routes, Route, useNavigate, useLocation, Link } from "react-router-dom"
-import PatientListView from "./pages/PatientListView"
-import PatientRegistrationView from "./pages/PatientRegistrationView"
-import PatientDetailView from "./pages/PatientDetailView"
-import AppointmentsView from "./pages/AppointmentsView"
-import FinanceView from "./pages/FinanceView"
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Link, Navigate } from "react-router-dom";
+import PatientListView from "./pages/PatientListView";
+import PatientRegistrationView from "./pages/PatientRegistrationView";
+import PatientDetailView from "./pages/PatientDetailView";
+import AppointmentsView from "./pages/AppointmentsView";
+import FinanceView from "./pages/FinanceView";
+import Login from "./pages/Login";
+import { useAuth } from "./contexts/AuthContext";
 
-function TopBar(){
+function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAuthenticated, logout, user } = useAuth();
 
   const handleBack = () => {
     const idx = window.history.state?.idx ?? 0;
@@ -22,7 +25,7 @@ function TopBar(){
   const isAppointmentsRoute = location.pathname.startsWith("/appointments");
   const isFinanceRoute = location.pathname.startsWith("/finance");
 
-  return(
+  return (
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex h-12 max-w-5xl items-center gap-3 px-4">
           <button
@@ -71,23 +74,105 @@ function TopBar(){
               </Link>
 
             </div>
+
+            {isAuthenticated && (
+              <div className="ml-auto flex items-center gap-3">
+                {user?.name && (
+                  <span className="text-sm font-medium text-slate-600">
+                    {user.name}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-md border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-700 hover:text-slate-900"
+                >
+                  Sair
+                </button>
+              </div>
+            )}
       </div>
     </div>
   )
 }
 
+function RequireAuth({ children }) {
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <TopBar/>
-      <Routes>
-        <Route path="/" element={<PatientListView />} />
-        <Route path="/patient/register" element={<PatientRegistrationView />} />
-        <Route path="/patient/:id" element={<PatientDetailView />} />
-        <Route path="/patient/:id/edit" element={<PatientRegistrationView />} />
-        <Route path="/appointments" element={<AppointmentsView />} />
-        <Route path="/finance" element={<FinanceView />} />
-      </Routes>
+      <AppLayout />
     </BrowserRouter>
+  )
+}
+
+function AppLayout() {
+  const location = useLocation();
+  const hideTopBar = location.pathname === "/login";
+
+  return (
+    <>
+      {!hideTopBar && <TopBar />}
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <PatientListView />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/patient/register"
+          element={
+            <RequireAuth>
+              <PatientRegistrationView />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/patient/:id"
+          element={
+            <RequireAuth>
+              <PatientDetailView />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/patient/:id/edit"
+          element={
+            <RequireAuth>
+              <PatientRegistrationView />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/appointments"
+          element={
+            <RequireAuth>
+              <AppointmentsView />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/finance"
+          element={
+            <RequireAuth>
+              <FinanceView />
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    </>
   )
 }

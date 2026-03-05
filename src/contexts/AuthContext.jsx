@@ -1,32 +1,57 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { STORAGE_TOKEN_KEY, STORAGE_USER_KEY } from "../constants/auth";
 
 const AuthContext = createContext(null);
-const STORAGE_KEY = "psi-docs-auth-token";
+
+const readStoredUser = () => {
+  const raw = localStorage.getItem(STORAGE_USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
 
 export function AuthProvider({ children }) {
-  const [token, setTokenState] = useState(() => localStorage.getItem(STORAGE_KEY));
+  const [token, setTokenState] = useState(() => localStorage.getItem(STORAGE_TOKEN_KEY));
+  const [user, setUserState] = useState(() => readStoredUser());
 
-  const setToken = useCallback((nextToken) => {
+  const setSession = useCallback((nextToken, nextUser) => {
     if (nextToken) {
-      localStorage.setItem(STORAGE_KEY, nextToken);
+      localStorage.setItem(STORAGE_TOKEN_KEY, nextToken);
       setTokenState(nextToken);
-      return;
+    } else {
+      localStorage.removeItem(STORAGE_TOKEN_KEY);
+      setTokenState(null);
     }
 
-    localStorage.removeItem(STORAGE_KEY);
-    setTokenState(null);
+    if (nextUser) {
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(nextUser));
+      setUserState(nextUser);
+    } else {
+      localStorage.removeItem(STORAGE_USER_KEY);
+      setUserState(null);
+    }
   }, []);
 
-  const logout = useCallback(() => setToken(null), [setToken]);
+  const logout = useCallback(() => setSession(null, null), [setSession]);
+
+  useEffect(() => {
+    const handleLogout = () => setSession(null, null);
+    window.addEventListener("auth:logout", handleLogout);
+    return () => window.removeEventListener("auth:logout", handleLogout);
+  }, [setSession]);
 
   const value = useMemo(
     () => ({
       token,
-      setToken,
+      user,
+      setSession,
       logout,
       isAuthenticated: Boolean(token),
     }),
-    [token, setToken, logout]
+    [token, user, setSession, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
