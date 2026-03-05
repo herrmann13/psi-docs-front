@@ -9,6 +9,7 @@ const INITIAL_FORM = {
   phone: "",
   addressStreet: "",
   addressNumber: "",
+  addressComplement: "",
   addressNeighborhood: "",
   addressCity: "",
   addressState: "",
@@ -262,6 +263,17 @@ export default function PatientRegistrationView() {
                     value={form.addressNumber}
                     onChange={handleChange("addressNumber")}
                     placeholder="Número"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                  />
+                  <label>
+                    Complemento
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="text"
+                    value={form.addressComplement}
+                    onChange={handleChange("addressComplement")}
+                    placeholder="Apto, bloco, etc"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                   />
                   <label>

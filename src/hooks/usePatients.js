@@ -23,6 +23,7 @@ const normalizeEmergencyContacts = (patient, cached) => {
 
 const normalizePatient = (patient, cached) => {
   if (!patient || typeof patient !== "object") return cached || {};
+  const address = patient.address || {};
   const base = {
     ...cached,
     ...patient,
@@ -32,20 +33,43 @@ const normalizePatient = (patient, cached) => {
   return {
     ...base,
     ...normalizeEmergencyContacts(patient, cached),
-    addressStreet: patient.addressStreet || cached?.addressStreet || "",
-    addressNumber: patient.addressNumber || cached?.addressNumber || "",
-    addressNeighborhood: patient.addressNeighborhood || cached?.addressNeighborhood || "",
-    addressCity: patient.addressCity || cached?.addressCity || "",
-    addressState: patient.addressState || cached?.addressState || "",
+    addressStreet: patient.addressStreet || address.street || cached?.addressStreet || "",
+    addressNumber: patient.addressNumber || address.number || cached?.addressNumber || "",
+    addressComplement:
+      patient.addressComplement || address.complement || cached?.addressComplement || "",
+    addressNeighborhood:
+      patient.addressNeighborhood || address.neighborhood || cached?.addressNeighborhood || "",
+    addressCity: patient.addressCity || address.city || cached?.addressCity || "",
+    addressState: patient.addressState || address.state || cached?.addressState || "",
   };
 };
 
-const buildPayload = (data = {}) => ({
-  fullName: data.name || data.fullName || "",
-  cpf: data.cpf || "",
-  birthDate: data.birthDate || null,
-  phone: data.phone || "",
-});
+const buildPayload = (data = {}) => {
+  const contacts = Array.isArray(data.emergencyContacts) ? data.emergencyContacts : [];
+  const sanitizedContacts = contacts
+    .map((contact) => ({
+      name: contact?.name?.trim() || "",
+      phone: contact?.phone?.trim() || "",
+      isActive: contact?.isActive ?? true,
+    }))
+    .filter((contact) => contact.name || contact.phone);
+
+  return {
+    fullName: data.name || data.fullName || "",
+    cpf: data.cpf || "",
+    birthDate: data.birthDate || null,
+    phone: data.phone || "",
+    address: {
+      street: data.addressStreet || data.address?.street || "",
+      number: data.addressNumber || data.address?.number || "",
+      complement: data.addressComplement || data.address?.complement || "",
+      neighborhood: data.addressNeighborhood || data.address?.neighborhood || "",
+      city: data.addressCity || data.address?.city || "",
+      state: data.addressState || data.address?.state || "",
+    },
+    emergencyContacts: sanitizedContacts,
+  };
+};
 
 export default function usePatients() {
   const cached = loadPatientsCache();
