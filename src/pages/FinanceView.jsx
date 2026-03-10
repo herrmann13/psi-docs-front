@@ -2,43 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { CHARGE_STATUSES } from "../constants/charges";
 import { PAYMENT_METHODS } from "../constants/payments";
 import { chargesService } from "../services/api/charges";
-import { paymentsService } from "../services/api/payments";
-import { paymentChargesService } from "../services/api/paymentCharges";
-import { paymentAttachmentsService } from "../services/api/paymentAttachments";
+import { appointmentsService } from "../services/api/appointments";
+import usePatients from "../hooks/usePatients";
 
-const EMPTY_CHARGE = {
-  id: "",
+const EMPTY_MANUAL_CHARGE = {
   appointmentId: "",
-  patientId: "",
   originalAmount: "",
-  outstandingAmount: "",
-  status: "PENDING",
   dueDate: "",
 };
 
 const EMPTY_PAYMENT = {
-  id: "",
-  patientId: "",
-  totalAmount: "",
+  chargeId: "",
+  amountPaid: "",
   paymentMethod: "PIX",
   paymentDate: "",
   notes: "",
-};
-
-const EMPTY_LINK = {
-  paymentId: "",
-  chargeId: "",
-  amountPaid: "",
-};
-
-const EMPTY_ATTACHMENT = {
-  paymentId: "",
-  filePath: "",
-  originalFilename: "",
-  mimeType: "",
-  fileSize: "",
-  fileHash: "",
-  uploadedAt: "",
 };
 
 const toNumber = (value) => {
@@ -53,6 +31,21 @@ const toIso = (value) => {
   return date.toISOString();
 };
 
+const formatCurrency = (value) => {
+  const numeric = Number(value) || 0;
+  return numeric.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+};
+
+const formatDate = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("pt-BR");
+};
+
 const formatDateTime = (value) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -60,47 +53,119 @@ const formatDateTime = (value) => {
   return date.toLocaleString("pt-BR");
 };
 
+const getChargeStatusLabel = (status) => {
+  const labels = {
+    PENDING: "Pendente",
+    PARTIALLY_PAID: "Parcial",
+    PAID: "Pago",
+    CANCELLED: "Cancelada",
+  };
+  return labels[status] || status;
+};
+
+const getChargeCardClasses = (status) => {
+  switch (status) {
+    case "PAID":
+      return "border-emerald-200 bg-emerald-50";
+    case "PARTIALLY_PAID":
+      return "border-amber-200 bg-amber-50";
+    case "CANCELLED":
+      return "border-rose-200 bg-rose-50";
+    case "PENDING":
+    default:
+      return "border-slate-200 bg-white";
+  }
+};
+
 export default function FinanceView() {
   const [charges, setCharges] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [links, setLinks] = useState([]);
-  const [attachments, setAttachments] = useState([]);
-  const [chargeForm, setChargeForm] = useState(EMPTY_CHARGE);
+  const [appointments, setAppointments] = useState([]);
+  const [manualChargeForm, setManualChargeForm] = useState(EMPTY_MANUAL_CHARGE);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT);
-  const [linkForm, setLinkForm] = useState(EMPTY_LINK);
-  const [attachmentForm, setAttachmentForm] = useState(EMPTY_ATTACHMENT);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [searchTerm, setSearchTerm] = useState("");
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const { patients } = usePatients();
 
-  const loadAll = async () => {
+  const loadFinancialData = async () => {
+    setIsLoading(true);
     setError("");
     try {
-      const [chargesData, paymentsData, linksData, attachmentsData] = await Promise.all([
+      const [chargesData, appointmentsData] = await Promise.all([
         chargesService.list(),
-        paymentsService.list(),
-        paymentChargesService.list(),
-        paymentAttachmentsService.list(),
+        appointmentsService.list(),
       ]);
       setCharges(Array.isArray(chargesData) ? chargesData : []);
-      setPayments(Array.isArray(paymentsData) ? paymentsData : []);
-      setLinks(Array.isArray(linksData) ? linksData : []);
-      setAttachments(Array.isArray(attachmentsData) ? attachmentsData : []);
+      setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
     } catch (err) {
       setError(err.message || "Erro ao carregar financeiro.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAll();
+    loadFinancialData();
   }, []);
 
-  const resetCharge = () => setChargeForm(EMPTY_CHARGE);
-  const resetPayment = () => setPaymentForm(EMPTY_PAYMENT);
-  const resetLink = () => setLinkForm(EMPTY_LINK);
-  const resetAttachment = () => setAttachmentForm(EMPTY_ATTACHMENT);
+  const appointmentById = useMemo(
+    () => new Map(appointments.map((appointment) => [String(appointment.id), appointment])),
+    [appointments]
+  );
 
-  const handleChargeChange = (field) => (event) => {
+  const patientById = useMemo(
+    () => new Map(patients.map((patient) => [String(patient.id), patient])),
+    [patients]
+  );
+
+  const resolvePatientName = (charge) => {
+    const appointment = appointmentById.get(String(charge.appointmentId));
+    const patientId = appointment?.patientId ?? charge.patientId;
+    const patient = patientById.get(String(patientId));
+    return patient?.name || patient?.fullName || `Paciente ${patientId ?? "-"}`;
+  };
+
+  const totals = useMemo(() => {
+    return charges.reduce(
+      (acc, charge) => {
+        const original = Number(charge.originalAmount) || 0;
+        const outstanding = Number(charge.outstandingAmount) || 0;
+        const paid = Math.max(0, original - outstanding);
+
+        acc.received += paid;
+        if (charge.status === "PENDING" || charge.status === "PARTIALLY_PAID") {
+          acc.pending += outstanding;
+        }
+        return acc;
+      },
+      { received: 0, pending: 0 }
+    );
+  }, [charges]);
+
+  const filteredCharges = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return charges.filter((charge) => {
+      if (statusFilter !== "ALL" && charge.status !== statusFilter) return false;
+      if (!term) return true;
+
+      const appointment = appointmentById.get(String(charge.appointmentId));
+      const patientName = resolvePatientName(charge).toLowerCase();
+      const appointmentId = String(charge.appointmentId || "");
+      const patientId = String(appointment?.patientId ?? charge.patientId ?? "");
+
+      return (
+        patientName.includes(term) ||
+        appointmentId.includes(term) ||
+        patientId.includes(term)
+      );
+    });
+  }, [charges, statusFilter, searchTerm, appointmentById, patientById]);
+
+  const handleManualChargeChange = (field) => (event) => {
     const { value } = event.target;
-    setChargeForm((current) => ({ ...current, [field]: value }));
+    setManualChargeForm((current) => ({ ...current, [field]: value }));
   };
 
   const handlePaymentChange = (field) => (event) => {
@@ -108,146 +173,81 @@ export default function FinanceView() {
     setPaymentForm((current) => ({ ...current, [field]: value }));
   };
 
-  const handleLinkChange = (field) => (event) => {
-    const { value } = event.target;
-    setLinkForm((current) => ({ ...current, [field]: value }));
-  };
-
-  const handleAttachmentChange = (field) => (event) => {
-    const { value } = event.target;
-    setAttachmentForm((current) => ({ ...current, [field]: value }));
-  };
-
-  const handleChargeEdit = (charge) => {
-    setChargeForm({
-      id: charge.id || "",
-      appointmentId: charge.appointmentId ?? "",
-      patientId: charge.patientId ?? "",
-      originalAmount:
-        charge.originalAmount === null || charge.originalAmount === undefined
-          ? ""
-          : String(charge.originalAmount),
-      outstandingAmount:
-        charge.outstandingAmount === null || charge.outstandingAmount === undefined
-          ? ""
-          : String(charge.outstandingAmount),
-      status: charge.status || "PENDING",
-      dueDate: charge.dueDate || "",
-    });
-  };
-
-  const handlePaymentEdit = (payment) => {
-    setPaymentForm({
-      id: payment.id || "",
-      patientId: payment.patientId ?? "",
-      totalAmount:
-        payment.totalAmount === null || payment.totalAmount === undefined
-          ? ""
-          : String(payment.totalAmount),
-      paymentMethod: payment.paymentMethod || "PIX",
-      paymentDate: payment.paymentDate ? payment.paymentDate.slice(0, 16) : "",
-      notes: payment.notes || "",
-    });
-  };
-
-  const handleChargeSubmit = async (event) => {
+  const handleManualChargeSubmit = async (event) => {
     event.preventDefault();
     setError("");
+
     const payload = {
-      appointmentId: toNumber(chargeForm.appointmentId),
-      patientId: toNumber(chargeForm.patientId),
-      originalAmount: toNumber(chargeForm.originalAmount),
-      outstandingAmount: toNumber(chargeForm.outstandingAmount),
-      status: chargeForm.status,
-      dueDate: chargeForm.dueDate || null,
+      appointmentId: toNumber(manualChargeForm.appointmentId),
     };
 
-    try {
-      if (chargeForm.id) {
-        await chargesService.update(chargeForm.id, payload);
-      } else {
-        await chargesService.create(payload);
-      }
-      resetCharge();
-      await loadAll();
-    } catch (err) {
-      setError(err.message || "Erro ao salvar cobranca.");
+    if (manualChargeForm.originalAmount !== "") {
+      payload.originalAmount = toNumber(manualChargeForm.originalAmount);
     }
+
+    if (manualChargeForm.dueDate) {
+      payload.dueDate = manualChargeForm.dueDate;
+    }
+
+    try {
+      await chargesService.create(payload);
+      setManualChargeForm(EMPTY_MANUAL_CHARGE);
+      await loadFinancialData();
+    } catch (err) {
+      setError(err.message || "Erro ao criar cobranca manual.");
+    }
+  };
+
+  const handleOpenPaymentModal = (charge) => {
+    setPaymentForm({
+      ...EMPTY_PAYMENT,
+      chargeId: String(charge.id),
+      amountPaid: String(charge.outstandingAmount ?? ""),
+    });
+    setIsPaymentModalOpen(true);
+  };
+
+  const handleClosePaymentModal = () => {
+    setIsPaymentModalOpen(false);
+    setPaymentForm(EMPTY_PAYMENT);
   };
 
   const handlePaymentSubmit = async (event) => {
     event.preventDefault();
     setError("");
+
+    const chargeId = toNumber(paymentForm.chargeId);
     const payload = {
-      patientId: toNumber(paymentForm.patientId),
-      totalAmount: toNumber(paymentForm.totalAmount),
+      amountPaid: toNumber(paymentForm.amountPaid),
       paymentMethod: paymentForm.paymentMethod,
-      paymentDate: toIso(paymentForm.paymentDate),
-      notes: paymentForm.notes || null,
     };
 
+    if (paymentForm.paymentDate) {
+      payload.paymentDate = toIso(paymentForm.paymentDate);
+    }
+
+    if (paymentForm.notes.trim()) {
+      payload.notes = paymentForm.notes.trim();
+    }
+
     try {
-      if (paymentForm.id) {
-        await paymentsService.update(paymentForm.id, payload);
+      const result = await chargesService.addPayment(chargeId, payload);
+      if (result?.charge) {
+        setCharges((current) =>
+          current.map((charge) =>
+            String(charge.id) === String(result.charge.id)
+              ? { ...charge, ...result.charge }
+              : charge
+          )
+        );
       } else {
-        await paymentsService.create(payload);
+        await loadFinancialData();
       }
-      resetPayment();
-      await loadAll();
+      handleClosePaymentModal();
     } catch (err) {
-      setError(err.message || "Erro ao salvar pagamento.");
+      setError(err.message || "Erro ao registrar pagamento.");
     }
   };
-
-  const handleLinkSubmit = async (event) => {
-    event.preventDefault();
-    setError("");
-    const payload = {
-      paymentId: toNumber(linkForm.paymentId),
-      chargeId: toNumber(linkForm.chargeId),
-      amountPaid: toNumber(linkForm.amountPaid),
-    };
-
-    try {
-      await paymentChargesService.create(payload);
-      resetLink();
-      await loadAll();
-    } catch (err) {
-      setError(err.message || "Erro ao vincular pagamento.");
-    }
-  };
-
-  const handleAttachmentSubmit = async (event) => {
-    event.preventDefault();
-    setError("");
-    const payload = {
-      paymentId: toNumber(attachmentForm.paymentId),
-      filePath: attachmentForm.filePath,
-      originalFilename: attachmentForm.originalFilename,
-      mimeType: attachmentForm.mimeType,
-      fileSize: toNumber(attachmentForm.fileSize),
-      fileHash: attachmentForm.fileHash,
-      uploadedAt: toIso(attachmentForm.uploadedAt),
-    };
-
-    try {
-      await paymentAttachmentsService.create(payload);
-      resetAttachment();
-      await loadAll();
-    } catch (err) {
-      setError(err.message || "Erro ao salvar comprovante.");
-    }
-  };
-
-  const totals = useMemo(() => {
-    const paid = charges
-      .filter((charge) => charge.status === "PAID")
-      .reduce((sum, charge) => sum + (Number(charge.originalAmount) || 0), 0);
-    const pending = charges
-      .filter((charge) => charge.status !== "PAID")
-      .reduce((sum, charge) => sum + (Number(charge.outstandingAmount) || 0), 0);
-    return { paid, pending };
-  }, [charges]);
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 sm:px-8 sm:py-10">
@@ -266,7 +266,7 @@ export default function FinanceView() {
                 Total recebido
               </p>
               <p className="text-lg font-semibold text-emerald-700">
-                {totals.paid.toFixed(2)}
+                {formatCurrency(totals.received)}
               </p>
             </div>
             <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
@@ -274,7 +274,7 @@ export default function FinanceView() {
                 Total pendente
               </p>
               <p className="text-lg font-semibold text-amber-700">
-                {totals.pending.toFixed(2)}
+                {formatCurrency(totals.pending)}
               </p>
             </div>
           </div>
@@ -287,389 +287,204 @@ export default function FinanceView() {
 
           <section className="mt-8 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Cobrancas
+              Criar cobranca manual
             </h2>
-            <form onSubmit={handleChargeSubmit} className="space-y-3">
+            <form onSubmit={handleManualChargeSubmit} className="space-y-3">
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
-                  <label className="text-sm font-medium text-slate-700">ID da sessao</label>
+                  <label className="text-sm font-medium text-slate-700">ID da consulta</label>
                   <input
                     type="number"
-                    value={chargeForm.appointmentId}
-                    onChange={handleChargeChange("appointmentId")}
+                    required
+                    value={manualChargeForm.appointmentId}
+                    onChange={handleManualChargeChange("appointmentId")}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">ID do paciente</label>
+                  <label className="text-sm font-medium text-slate-700">Valor original (opcional)</label>
                   <input
                     type="number"
-                    value={chargeForm.patientId}
-                    onChange={handleChargeChange("patientId")}
+                    step="0.01"
+                    min="0"
+                    value={manualChargeForm.originalAmount}
+                    onChange={handleManualChargeChange("originalAmount")}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Vencimento</label>
+                  <label className="text-sm font-medium text-slate-700">Vencimento (opcional)</label>
                   <input
                     type="date"
-                    value={chargeForm.dueDate}
-                    onChange={handleChargeChange("dueDate")}
+                    value={manualChargeForm.dueDate}
+                    onChange={handleManualChargeChange("dueDate")}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                   />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Valor original</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={chargeForm.originalAmount}
-                    onChange={handleChargeChange("originalAmount")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Saldo em aberto</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={chargeForm.outstandingAmount}
-                    onChange={handleChargeChange("outstandingAmount")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Status</label>
-                  <select
-                    value={chargeForm.status}
-                    onChange={handleChargeChange("status")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  >
-                    {CHARGE_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
-                >
-                  {chargeForm.id ? "Atualizar cobranca" : "Criar cobranca"}
-                </button>
-                {chargeForm.id ? (
-                  <button
-                    type="button"
-                    onClick={resetCharge}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                  >
-                    Cancelar edicao
-                  </button>
-                ) : null}
-              </div>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
+              >
+                Criar cobranca
+              </button>
             </form>
-
-            <div className="space-y-3">
-              {charges.map((charge) => (
-                <div key={charge.id} className="rounded-lg border border-slate-200 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-base font-semibold text-slate-900">Cobranca #{charge.id}</p>
-                      <p className="text-sm text-slate-500">
-                        Paciente {charge.patientId} | Sessao {charge.appointmentId}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {charge.status}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
-                    <span>Valor: {charge.originalAmount ?? "-"}</span>
-                    <span>Saldo: {charge.outstandingAmount ?? "-"}</span>
-                    <span>Vencimento: {charge.dueDate || "-"}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleChargeEdit(charge)}
-                    className="mt-3 inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    Editar
-                  </button>
-                </div>
-              ))}
-            </div>
           </section>
 
           <section className="mt-10 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Pagamentos
+              Cobrancas
             </h2>
-            <form onSubmit={handlePaymentSubmit} className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="text-sm font-medium text-slate-700">ID do paciente</label>
-                  <input
-                    type="number"
-                    value={paymentForm.patientId}
-                    onChange={handlePaymentChange("patientId")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Valor total</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={paymentForm.totalAmount}
-                    onChange={handlePaymentChange("totalAmount")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Metodo</label>
-                  <select
-                    value={paymentForm.paymentMethod}
-                    onChange={handlePaymentChange("paymentMethod")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  >
-                    {PAYMENT_METHODS.map((method) => (
-                      <option key={method} value={method}>
-                        {method}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Data do pagamento</label>
-                  <input
-                    type="datetime-local"
-                    value={paymentForm.paymentDate}
-                    onChange={handlePaymentChange("paymentDate")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="text-sm font-medium text-slate-700">Notas</label>
-                  <input
-                    type="text"
-                    value={paymentForm.notes}
-                    onChange={handlePaymentChange("notes")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                    placeholder="Observacoes"
-                  />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
-                >
-                  {paymentForm.id ? "Atualizar pagamento" : "Criar pagamento"}
-                </button>
-                {paymentForm.id ? (
-                  <button
-                    type="button"
-                    onClick={resetPayment}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                  >
-                    Cancelar edicao
-                  </button>
-                ) : null}
-              </div>
-            </form>
 
-            <div className="space-y-3">
-              {payments.map((payment) => (
-                <div key={payment.id} className="rounded-lg border border-slate-200 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-base font-semibold text-slate-900">Pagamento #{payment.id}</p>
-                      <p className="text-sm text-slate-500">Paciente {payment.patientId}</p>
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {payment.paymentMethod}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
-                    <span>Valor: {payment.totalAmount ?? "-"}</span>
-                    <span>Data: {formatDateTime(payment.paymentDate)}</span>
-                    <span>Notas: {payment.notes || "-"}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handlePaymentEdit(payment)}
-                    className="mt-3 inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    Editar
-                  </button>
-                </div>
-              ))}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Buscar por paciente, consulta ou ID"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400 sm:col-span-2"
+              />
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
+              >
+                <option value="ALL">Todos os status</option>
+                {CHARGE_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {getChargeStatusLabel(status)}
+                  </option>
+                ))}
+              </select>
             </div>
-          </section>
 
-          <section className="mt-10 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Vincular pagamento a cobranca
-            </h2>
-            <form onSubmit={handleLinkSubmit} className="grid gap-4 sm:grid-cols-3">
-              <div>
-                <label className="text-sm font-medium text-slate-700">ID do pagamento</label>
-                <input
-                  type="number"
-                  value={linkForm.paymentId}
-                  onChange={handleLinkChange("paymentId")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
+            {isLoading ? (
+              <p className="text-sm text-slate-500">Carregando...</p>
+            ) : filteredCharges.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma cobranca encontrada.</p>
+            ) : (
+              <div className="space-y-3">
+                {filteredCharges.map((charge) => {
+                  const appointment = appointmentById.get(String(charge.appointmentId));
+                  const canPay = charge.status !== "PAID" && charge.status !== "CANCELLED";
+
+                  return (
+                    <div
+                      key={charge.id}
+                      className={`rounded-lg border p-4 ${getChargeCardClasses(charge.status)}`}
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-base font-semibold text-slate-900">Cobranca #{charge.id}</p>
+                          <p className="text-sm text-slate-600">{resolvePatientName(charge)}</p>
+                        </div>
+                        <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700">
+                          {getChargeStatusLabel(charge.status)}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+                        <span>Consulta: #{charge.appointmentId}</span>
+                        <span>Data consulta: {formatDateTime(appointment?.startTime)}</span>
+                        <span>Valor original: {formatCurrency(charge.originalAmount)}</span>
+                        <span>Saldo atual: {formatCurrency(charge.outstandingAmount)}</span>
+                        <span>Vencimento: {formatDate(charge.dueDate)}</span>
+                      </div>
+
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          disabled={!canPay}
+                          onClick={() => handleOpenPaymentModal(charge)}
+                          className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Incluir pagamento
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">ID da cobranca</label>
-                <input
-                  type="number"
-                  value={linkForm.chargeId}
-                  onChange={handleLinkChange("chargeId")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {isPaymentModalOpen ? (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Incluir pagamento</h3>
+            <p className="mt-1 text-sm text-slate-500">Cobranca #{paymentForm.chargeId}</p>
+
+            <form onSubmit={handlePaymentSubmit} className="mt-4 space-y-4">
               <div>
                 <label className="text-sm font-medium text-slate-700">Valor pago</label>
                 <input
                   type="number"
                   step="0.01"
-                  value={linkForm.amountPaid}
-                  onChange={handleLinkChange("amountPaid")}
+                  min="0"
+                  required
+                  value={paymentForm.amountPaid}
+                  onChange={handlePaymentChange("amountPaid")}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 />
               </div>
-              <div className="sm:col-span-3">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
-                >
-                  Vincular pagamento
-                </button>
-                <button
-                  type="button"
-                  onClick={resetLink}
-                  className="ml-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                >
-                  Limpar
-                </button>
-              </div>
-            </form>
 
-            <div className="space-y-3">
-              {links.map((link) => (
-                <div key={link.id} className="rounded-lg border border-slate-200 p-4 text-sm text-slate-600">
-                  Pagamento {link.paymentId} vinculado a cobranca {link.chargeId} - Valor {link.amountPaid}
-                </div>
-              ))}
-            </div>
-          </section>
+              <div>
+                <label className="text-sm font-medium text-slate-700">Metodo de pagamento</label>
+                <select
+                  required
+                  value={paymentForm.paymentMethod}
+                  onChange={handlePaymentChange("paymentMethod")}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  {PAYMENT_METHODS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <section className="mt-10 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Comprovantes
-            </h2>
-            <form onSubmit={handleAttachmentSubmit} className="grid gap-4 sm:grid-cols-3">
               <div>
-                <label className="text-sm font-medium text-slate-700">ID do pagamento</label>
-                <input
-                  type="number"
-                  value={attachmentForm.paymentId}
-                  onChange={handleAttachmentChange("paymentId")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Arquivo</label>
-                <input
-                  type="text"
-                  value={attachmentForm.originalFilename}
-                  onChange={handleAttachmentChange("originalFilename")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  placeholder="recibo.pdf"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Caminho</label>
-                <input
-                  type="text"
-                  value={attachmentForm.filePath}
-                  onChange={handleAttachmentChange("filePath")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  placeholder="/uploads/payments/1/recibo.pdf"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Mime type</label>
-                <input
-                  type="text"
-                  value={attachmentForm.mimeType}
-                  onChange={handleAttachmentChange("mimeType")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  placeholder="application/pdf"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Tamanho (bytes)</label>
-                <input
-                  type="number"
-                  value={attachmentForm.fileSize}
-                  onChange={handleAttachmentChange("fileSize")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Hash</label>
-                <input
-                  type="text"
-                  value={attachmentForm.fileHash}
-                  onChange={handleAttachmentChange("fileHash")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Data do upload</label>
+                <label className="text-sm font-medium text-slate-700">Data do pagamento (opcional)</label>
                 <input
                   type="datetime-local"
-                  value={attachmentForm.uploadedAt}
-                  onChange={handleAttachmentChange("uploadedAt")}
+                  value={paymentForm.paymentDate}
+                  onChange={handlePaymentChange("paymentDate")}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 />
               </div>
-              <div className="sm:col-span-3">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
-                >
-                  Salvar comprovante
-                </button>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Observacoes (opcional)</label>
+                <textarea
+                  rows={3}
+                  value={paymentForm.notes}
+                  onChange={handlePaymentChange("notes")}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={resetAttachment}
-                  className="ml-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  onClick={handleClosePaymentModal}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
-                  Limpar
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                  Salvar pagamento
                 </button>
               </div>
             </form>
-
-            <div className="space-y-3">
-              {attachments.map((attachment) => (
-                <div key={attachment.id} className="rounded-lg border border-slate-200 p-4 text-sm text-slate-600">
-                  <div className="font-semibold text-slate-900">{attachment.originalFilename}</div>
-                  <div>Pagamento {attachment.paymentId}</div>
-                  <div>Arquivo: {attachment.filePath}</div>
-                  <div>Upload: {formatDateTime(attachment.uploadedAt)}</div>
-                </div>
-              ))}
-            </div>
-          </section>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

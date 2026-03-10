@@ -18,6 +18,29 @@ const parseResponse = async (response) => {
   }
 };
 
+const buildErrorMessage = (data) => {
+  if (!data) return "Erro ao comunicar com o servidor.";
+  if (typeof data === "string") return data;
+
+  const baseMessage = data.message || "Erro ao comunicar com o servidor.";
+  const fieldErrors = data?.errors?.fieldErrors;
+
+  if (!fieldErrors || typeof fieldErrors !== "object") {
+    return baseMessage;
+  }
+
+  const details = Object.entries(fieldErrors).flatMap(([field, messages]) => {
+    if (!Array.isArray(messages)) return [];
+    return messages.map((message) => `${field}: ${message}`);
+  });
+
+  if (details.length === 0) {
+    return baseMessage;
+  }
+
+  return `${baseMessage}\n${details.join("\n")}`;
+};
+
 const request = async (path, options = {}) => {
   const storedToken = localStorage.getItem(STORAGE_TOKEN_KEY);
   const response = await fetch(buildUrl(path), {
@@ -36,9 +59,10 @@ const request = async (path, options = {}) => {
       localStorage.removeItem(STORAGE_USER_KEY);
       window.dispatchEvent(new Event("auth:logout"));
     }
-    const message =
-      (data && data.message) ||
-      (typeof data === "string" ? data : "Erro ao comunicar com o servidor.");
+    const message = buildErrorMessage(data);
+    if (typeof window !== "undefined") {
+      window.alert(message);
+    }
     throw new Error(message);
   }
 
@@ -51,5 +75,7 @@ export const apiClient = {
     request(path, { method: "POST", body: JSON.stringify(body) }),
   put: (path, body) =>
     request(path, { method: "PUT", body: JSON.stringify(body) }),
+  patch: (path, body) =>
+    request(path, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path) => request(path, { method: "DELETE" }),
 };

@@ -3,12 +3,15 @@ import { APPOINTMENT_STATUSES } from "../constants/appointments";
 import { appointmentsService } from "../services/api/appointments";
 import { chargesService } from "../services/api/charges";
 import usePatients from "../hooks/usePatients";
+import { useAuth } from "../contexts/AuthContext";
 
 const EMPTY_FORM = {
   id: "",
   patientId: "",
+  status: "SCHEDULED",
   startTime: "",
   endTime: "",
+  sessionValue: "",
 };
 
 const toInputDateTime = (value) => {
@@ -94,20 +97,70 @@ const buildDefaultStartTime = (date) => {
   )}T09:00`;
 };
 
-const toDateOnly = (value) => {
-  if (!value) return null;
+const addOneHourToInputDateTime = (value) => {
+  if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const pad = (num) => String(num).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  if (Number.isNaN(date.getTime())) return "";
+  date.setHours(date.getHours() + 1);
+  return toInputDateTime(date);
+};
+
+const toInputValue = (value) => {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value);
+};
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const getFirstName = (fullName) => {
+  if (!fullName) return "Paciente";
+  const [firstName] = String(fullName).trim().split(/\s+/);
+  return firstName || "Paciente";
+};
+
+const getStatusColorClasses = (status) => {
+  switch (status) {
+    case "CONFIRMED":
+      return {
+        calendar: "bg-emerald-100 text-emerald-800",
+        card: "border-emerald-200 bg-emerald-50",
+      };
+    case "COMPLETED":
+      return {
+        calendar: "bg-emerald-300 text-emerald-900",
+        card: "border-emerald-400 bg-emerald-100",
+      };
+    case "CANCELLED":
+      return {
+        calendar: "bg-rose-200 text-rose-900",
+        card: "border-rose-300 bg-rose-50",
+      };
+    case "NO_SHOW":
+      return {
+        calendar: "bg-rose-700 text-rose-50",
+        card: "border-rose-800 bg-rose-100",
+      };
+    case "SCHEDULED":
+    default:
+      return {
+        calendar: "bg-white text-slate-700 border border-slate-200",
+        card: "border-slate-200 bg-white",
+      };
+  }
 };
 
 export default function AppointmentsView() {
   const [appointments, setAppointments] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const { patients } = usePatients();
+  const { user } = useAuth();
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [isPatientListOpen, setIsPatientListOpen] = useState(false);
@@ -139,11 +192,37 @@ export default function AppointmentsView() {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
+  const handleStartTimeChange = (event) => {
+    const { value } = event.target;
+    setForm((current) => ({
+      ...current,
+      startTime: value,
+      endTime: value ? addOneHourToInputDateTime(value) : "",
+    }));
+  };
+
+  const buildCreateForm = (startTime = "") => ({
+    ...EMPTY_FORM,
+    startTime,
+    endTime: startTime ? addOneHourToInputDateTime(startTime) : "",
+    sessionValue: toInputValue(user?.defaultSessionValue),
+  });
+
+  const openCreateForm = () => {
+    const nextStartTime = selectedDate ? buildDefaultStartTime(selectedDate) : "";
+    setForm(buildCreateForm(nextStartTime));
+    setPatientSearch("");
+    setSelectedPatient(null);
+    setIsPatientListOpen(false);
+    setIsFormOpen(true);
+  };
+
   const resetForm = () => {
     setForm(EMPTY_FORM);
     setPatientSearch("");
     setSelectedPatient(null);
     setIsPatientListOpen(false);
+    setIsFormOpen(false);
   };
 
   const handleEdit = (appointment) => {
@@ -165,9 +244,12 @@ export default function AppointmentsView() {
     setForm({
       id: appointment.id || "",
       patientId: nextPatient ? nextPatient.id : appointment.patientId ?? "",
+      status: appointment.status || "SCHEDULED",
       startTime: toInputDateTime(appointment.startTime),
       endTime: toInputDateTime(appointment.endTime),
+      sessionValue: toInputValue(appointment.sessionValue),
     });
+    setIsFormOpen(true);
   };
 
   const handleSubmit = async (event) => {
@@ -179,10 +261,43 @@ export default function AppointmentsView() {
       return;
     }
 
+    if (!form.startTime || !form.endTime) {
+      window.alert("Preencha inicio e fim da consulta.");
+      return;
+    }
+
+    if (form.sessionValue === "") {
+      window.alert("O valor da sessao e obrigatorio.");
+      return;
+    }
+
+    const psychologistId = user?.psychologistId ?? user?.id;
+    const parsedPsychologistId = Number(psychologistId);
+    const parsedPatientId = Number(form.patientId);
+    const parsedSessionValue = Number(form.sessionValue);
+
+    if (Number.isNaN(parsedPsychologistId)) {
+      window.alert("Nao foi possivel identificar o psicologo logado.");
+      return;
+    }
+
+    if (Number.isNaN(parsedPatientId)) {
+      window.alert("Selecione um paciente valido.");
+      return;
+    }
+
+    if (Number.isNaN(parsedSessionValue)) {
+      window.alert("Informe um valor de sessao valido.");
+      return;
+    }
+
     const payload = {
-      patientId: form.patientId,
+      patientId: parsedPatientId,
+      psychologistId: parsedPsychologistId,
+      status: form.status || "SCHEDULED",
       startTime: toIso(form.startTime),
       endTime: toIso(form.endTime),
+      sessionValue: parsedSessionValue,
     };
 
     try {
@@ -213,33 +328,22 @@ export default function AppointmentsView() {
 
   const updateStatus = async (appointment, nextStatus, extra = {}) => {
     setError("");
+    const payload = {
+      patientId: toNumberOrNull(appointment.patientId),
+      psychologistId: toNumberOrNull(appointment.psychologistId ?? user?.psychologistId ?? user?.id),
+      status: nextStatus,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
+      sessionValue: toNumberOrNull(appointment.sessionValue),
+      ...extra,
+    };
+
     try {
-      await appointmentsService.update(appointment.id, {
-        ...appointment,
-        status: nextStatus,
-        ...extra,
-      });
+      await appointmentsService.update(appointment.id, payload);
       await loadAppointments();
     } catch (err) {
       setError(err.message || "Erro ao atualizar status.");
     }
-  };
-
-  const handleConfirm = (appointment) =>
-    updateStatus(appointment, "CONFIRMED");
-
-  const handleComplete = (appointment) =>
-    updateStatus(appointment, "COMPLETED", { completedAt: new Date().toISOString() });
-
-  const handleNoShow = (appointment) =>
-    updateStatus(appointment, "NO_SHOW");
-
-  const handleCancel = (appointment) => {
-    const reason = window.prompt("Motivo do cancelamento?");
-    updateStatus(appointment, "CANCELLED", {
-      cancelledAt: new Date().toISOString(),
-      cancelledReason: reason || null,
-    });
   };
 
   const handleReschedule = (appointment) => {
@@ -255,11 +359,6 @@ export default function AppointmentsView() {
     try {
       await chargesService.create({
         appointmentId: appointment.id,
-        patientId: appointment.patientId,
-        originalAmount: appointment.sessionValue || 0,
-        outstandingAmount: appointment.sessionValue || 0,
-        status: "PENDING",
-        dueDate: toDateOnly(appointment.startTime),
       });
       window.alert("Cobranca criada com sucesso.");
     } catch (err) {
@@ -268,11 +367,13 @@ export default function AppointmentsView() {
   };
 
   const statusLabel = useMemo(
-    () =>
-      APPOINTMENT_STATUSES.reduce((acc, status) => {
-        acc[status] = status.replace("_", " ");
-        return acc;
-      }, {}),
+    () => ({
+      SCHEDULED: "Agendado",
+      CONFIRMED: "Confirmado",
+      COMPLETED: "Completado",
+      CANCELLED: "Cancelado",
+      NO_SHOW: "Falta",
+    }),
     []
   );
 
@@ -297,10 +398,14 @@ export default function AppointmentsView() {
   const handleSelectDate = (date) => {
     if (!date) return;
     setSelectedDate(date);
-    setForm((current) => ({
-      ...current,
-      startTime: buildDefaultStartTime(date),
-    }));
+    if (isFormOpen && !form.id) {
+      const nextStartTime = buildDefaultStartTime(date);
+      setForm((current) => ({
+        ...current,
+        startTime: nextStartTime,
+        endTime: addOneHourToInputDateTime(nextStartTime),
+      }));
+    }
   };
 
   const filteredPatients = useMemo(() => {
@@ -326,6 +431,31 @@ export default function AppointmentsView() {
     setPatientSearch(patient.name || patient.fullName || "");
     setForm((current) => ({ ...current, patientId: patient.id }));
     setIsPatientListOpen(false);
+  };
+
+  const patientNameById = useMemo(() => {
+    return new Map(
+      patients.map((patient) => [String(patient.id), patient.name || patient.fullName || "Paciente"])
+    );
+  }, [patients]);
+
+  const selectedDateAppointments = useMemo(() => {
+    if (!selectedDate) return [];
+    const selectedKey = toDateKey(selectedDate);
+    const items = appointmentsByDate[selectedKey] || [];
+    return [...items].sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+    );
+  }, [selectedDate, appointmentsByDate]);
+
+  const getAppointmentPatientName = (appointment) => {
+    return (
+      appointment.patientName ||
+      appointment.patient?.name ||
+      appointment.patient?.fullName ||
+      patientNameById.get(String(appointment.patientId)) ||
+      `Paciente ${appointment.patientId}`
+    );
   };
 
   return (
@@ -405,12 +535,10 @@ export default function AppointmentsView() {
                           <div
                             key={item.id}
                             className={`truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                              isSelected
-                                ? "bg-white/20 text-white"
-                                : "bg-slate-100 text-slate-700"
+                              getStatusColorClasses(item.status).calendar
                             }`}
                           >
-                            {toTimeLabel(item.startTime)} · Pac {item.patientId}
+                            {toTimeLabel(item.startTime)} - {getFirstName(getAppointmentPatientName(item))}
                           </div>
                         ))}
                         {items.length > 2 ? (
@@ -425,85 +553,108 @@ export default function AppointmentsView() {
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-              <div className="relative">
-                <label className="text-sm font-medium text-slate-700">Paciente</label>
-                <input
-                  type="text"
-                  value={patientSearch}
-                  onChange={handlePatientSearch}
-                  onFocus={() => setIsPatientListOpen(true)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  placeholder="Digite o nome ou CPF"
-                />
-                {isPatientListOpen ? (
-                  <div className="absolute z-10 mt-2 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                    {filteredPatients.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-500">
-                        Nenhum paciente encontrado.
-                      </div>
-                    ) : (
-                      filteredPatients.map((patient) => (
-                        <button
-                          type="button"
-                          key={patient.id}
-                          onClick={() => handleSelectPatient(patient)}
-                          className="flex w-full flex-col gap-1 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                        >
-                          <span className="font-semibold text-slate-900">
-                            {patient.name || patient.fullName || "Sem nome"}
-                          </span>
-                          <span className="text-xs text-slate-500">CPF {patient.cpf || "-"}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-                {selectedPatient ? (
-                  <div className="mt-2 text-xs text-slate-500">
-                    Selecionado: {selectedPatient.name || selectedPatient.fullName}
-                  </div>
-                ) : null}
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Inicio</label>
-                <input
-                  type="datetime-local"
-                  value={form.startTime}
-                  onChange={handleChange("startTime")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Fim</label>
-                <input
-                  type="datetime-local"
-                  value={form.endTime}
-                  onChange={handleChange("endTime")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
+            {!isFormOpen ? (
               <button
-                type="submit"
+                type="button"
+                onClick={openCreateForm}
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-3 focus:ring-slate-400"
               >
-                {form.id ? "Atualizar consulta" : "Criar consulta"}
+                Criar consulta
               </button>
-              {form.id ? (
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="relative">
+                  <label className="text-sm font-medium text-slate-700">Paciente</label>
+                  <input
+                    type="text"
+                    value={patientSearch}
+                    onChange={handlePatientSearch}
+                    onFocus={() => setIsPatientListOpen(true)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="Digite o nome ou CPF"
+                    required
+                  />
+                  {isPatientListOpen ? (
+                    <div className="absolute z-10 mt-2 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {filteredPatients.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-slate-500">
+                          Nenhum paciente encontrado.
+                        </div>
+                      ) : (
+                        filteredPatients.map((patient) => (
+                          <button
+                            type="button"
+                            key={patient.id}
+                            onClick={() => handleSelectPatient(patient)}
+                            className="flex w-full flex-col gap-1 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            <span className="font-semibold text-slate-900">
+                              {patient.name || patient.fullName || "Sem nome"}
+                            </span>
+                            <span className="text-xs text-slate-500">CPF {patient.cpf || "-"}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                  {selectedPatient ? (
+                    <div className="mt-2 text-xs text-slate-500">
+                      Selecionado: {selectedPatient.name || selectedPatient.fullName}
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Inicio</label>
+                  <input
+                    type="datetime-local"
+                    value={form.startTime}
+                    onChange={handleStartTimeChange}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Fim</label>
+                  <input
+                    type="datetime-local"
+                    value={form.endTime}
+                    onChange={handleChange("endTime")}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Valor da sessao</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.sessionValue}
+                    onChange={handleChange("sessionValue")}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-3 focus:ring-slate-400"
+                >
+                  {form.id ? "Salvar alteracoes" : "Salvar consulta"}
+                </button>
                 <button
                   type="button"
                   onClick={resetForm}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-3 focus:ring-slate-400"
                 >
-                  Cancelar edicao
+                  Cancelar
                 </button>
-              ) : null}
-            </div>
-            </form>
+              </div>
+              </form>
+            )}
           </div>
 
           {error ? (
@@ -518,95 +669,104 @@ export default function AppointmentsView() {
             </h2>
             {isLoading ? (
               <p className="mt-3 text-sm text-slate-500">Carregando...</p>
+            ) : !selectedDate ? (
+              <p className="mt-3 text-sm text-slate-500">
+                Selecione um dia no calendario para ver as consultas.
+              </p>
             ) : (
               <div className="mt-3 space-y-4">
-                {appointments.map((appointment) => (
+                {selectedDateAppointments.map((appointment) => (
                   <div
                     key={appointment.id}
-                    className="rounded-xl border border-slate-200 p-4 shadow-sm"
+                    className={`rounded-xl border p-4 shadow-sm ${getStatusColorClasses(appointment.status).card}`}
                   >
+                    {(() => {
+                      const patientName = getAppointmentPatientName(appointment);
+                      const firstName = getFirstName(patientName);
+                      const cardTitle = `${toTimeLabel(appointment.startTime)} - ${formatDate(
+                        appointment.startTime
+                      )} ${firstName}`;
+
+                      return (
+                        <>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-base font-semibold text-slate-900">
-                          Consulta #{appointment.id}
+                          {cardTitle}
                         </p>
-                      <p className="text-sm text-slate-500">
-                          Paciente {appointment.patientId} | {formatDate(appointment.startTime)}
+                       <p className="text-sm text-slate-500">
+                          {patientName}
                         </p>
                       </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {statusLabel[appointment.status] || appointment.status}
-                      </span>
                     </div>
                     <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
                       <span>Inicio: {formatDateTime(appointment.startTime)}</span>
                       <span>Fim: {formatDateTime(appointment.endTime)}</span>
                       <span>Atualizado: {formatDateTime(appointment.updatedAt)}</span>
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleEdit(appointment)}
-                        className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleConfirm(appointment)}
-                        className="inline-flex items-center rounded-full border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
-                      >
-                        Confirmar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleComplete(appointment)}
-                        className="inline-flex items-center rounded-full border border-indigo-200 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
-                      >
-                        Concluir
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleNoShow(appointment)}
-                        className="inline-flex items-center rounded-full border border-amber-200 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50"
-                      >
-                        Falta
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReschedule(appointment)}
-                        className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        Reagendar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCancel(appointment)}
-                        className="inline-flex items-center rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleGenerateCharge(appointment)}
-                        className="inline-flex items-center rounded-full border border-slate-900 bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-700"
-                      >
-                        Gerar cobranca
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(appointment.id)}
-                        className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
-                      >
-                        Remover
-                      </button>
+                    <div className="mt-4 flex items-end justify-between gap-3">
+                      <div className="min-w-40">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Status
+                        </label>
+                        <select
+                          value={appointment.status || "SCHEDULED"}
+                          onChange={(event) => updateStatus(appointment, event.target.value)}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
+                        >
+                          {APPOINTMENT_STATUSES.map((status) => (
+                            <option key={status} value={status}>
+                              {statusLabel[status] || status}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <details className="relative">
+                        <summary className="cursor-pointer list-none rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                          Opcoes
+                        </summary>
+                        <div className="absolute right-0 z-10 mt-2 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(appointment)}
+                            className="w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReschedule(appointment)}
+                            className="w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            Reagendar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateCharge(appointment)}
+                            className="w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            Gerar cobranca
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(appointment.id)}
+                            className="w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </details>
                     </div>
+                    </>
+                      );
+                    })()}
                   </div>
                 ))}
 
-                {appointments.length === 0 && !isLoading ? (
+                {selectedDateAppointments.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    Nenhuma consulta cadastrada.
+                    Nenhuma consulta cadastrada para este dia.
                   </p>
                 ) : null}
               </div>

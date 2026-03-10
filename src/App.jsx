@@ -6,11 +6,12 @@ import AppointmentsView from "./pages/AppointmentsView";
 import FinanceView from "./pages/FinanceView";
 import Login from "./pages/Login";
 import { useAuth } from "./contexts/AuthContext";
+import { usersService } from "./services/api/users";
 
 function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated, logout, user } = useAuth();
+  const { isAuthenticated, logout, user, updateUser } = useAuth();
 
   const handleBack = () => {
     const idx = window.history.state?.idx ?? 0;
@@ -24,6 +25,40 @@ function TopBar() {
   const isPatientsRoute = location.pathname === "/" || location.pathname.startsWith("/patient");
   const isAppointmentsRoute = location.pathname.startsWith("/appointments");
   const isFinanceRoute = location.pathname.startsWith("/finance");
+
+  const handleUserSettings = async () => {
+    if (!user?.id) {
+      window.alert("Usuario nao identificado para configurar valor padrao da sessao.");
+      return;
+    }
+
+    const currentValue =
+      user.defaultSessionValue === null || user.defaultSessionValue === undefined
+        ? ""
+        : String(user.defaultSessionValue);
+    const input = window.prompt("Valor padrao da sessao", currentValue);
+    if (input === null) return;
+
+    const trimmed = input.trim();
+    if (!trimmed) {
+      window.alert("Informe um valor padrao valido.");
+      return;
+    }
+
+    const parsedValue = Number(trimmed);
+    if (Number.isNaN(parsedValue) || parsedValue < 0) {
+      window.alert("Informe um valor padrao valido.");
+      return;
+    }
+
+    try {
+      const updatedUser = await usersService.updateDefaultSessionValue(user.id, parsedValue);
+      updateUser(updatedUser || { ...user, defaultSessionValue: parsedValue });
+      window.alert("Valor padrao da sessao atualizado.");
+    } catch {
+      // erro tratado globalmente no apiClient
+    }
+  };
 
   return (
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
@@ -82,6 +117,13 @@ function TopBar() {
                     {user.name}
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={handleUserSettings}
+                  className="rounded-md border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-700 hover:text-slate-900"
+                >
+                  Configuracoes
+                </button>
                 <button
                   type="button"
                   onClick={logout}

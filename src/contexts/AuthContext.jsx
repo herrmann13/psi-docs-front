@@ -37,6 +37,17 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => setSession(null, null), [setSession]);
 
+  const updateUser = useCallback((nextUser) => {
+    if (!nextUser) {
+      localStorage.removeItem(STORAGE_USER_KEY);
+      setUserState(null);
+      return;
+    }
+
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(nextUser));
+    setUserState(nextUser);
+  }, []);
+
   useEffect(() => {
     const handleLogout = () => setSession(null, null);
     window.addEventListener("auth:logout", handleLogout);
@@ -48,10 +59,11 @@ export function AuthProvider({ children }) {
       token,
       user,
       setSession,
+      updateUser,
       logout,
       isAuthenticated: Boolean(token),
     }),
-    [token, user, setSession, logout]
+    [token, user, setSession, updateUser, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

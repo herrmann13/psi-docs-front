@@ -4,11 +4,17 @@ import usePatients from "../hooks/usePatients";
 
 const formatDate = (value) => {
   if (!value) return "-";
-  if (value.includes("-")) {
-    const [year, month, day] = value.split("-");
-    return [day, month, year].filter(Boolean).join("/");
+  const input = typeof value === "string" ? value : String(value);
+  const datePart = input.includes("T") ? input.split("T")[0] : input;
+
+  if (datePart.includes("-")) {
+    const [year, month, day] = datePart.split("-");
+    if (year && month && day) {
+      return [day, month, year].join("/");
+    }
   }
-  return value;
+
+  return datePart;
 };
 
 const displayValue = (value) => (value && value.trim ? value.trim() : value) || "-";
@@ -23,6 +29,27 @@ const buildWhatsAppLink = (value) => {
   const digits = normalizePhone(value);
   if (!digits) return "";
   return `https://wa.me/${digits}`;
+};
+
+const hasFilledContactField = (value) => Boolean(value && String(value).trim());
+
+const getEmergencyContacts = (patient) => {
+  if (Array.isArray(patient?.emergencyContacts)) {
+    return patient.emergencyContacts.filter(
+      (contact) => hasFilledContactField(contact?.name) || hasFilledContactField(contact?.phone)
+    );
+  }
+
+  return [
+    {
+      name: patient?.emergencyContact1Name,
+      phone: patient?.emergencyContact1Phone,
+    },
+    {
+      name: patient?.emergencyContact2Name,
+      phone: patient?.emergencyContact2Phone,
+    },
+  ].filter((contact) => hasFilledContactField(contact.name) || hasFilledContactField(contact.phone));
 };
 
 function DetailRow({ label, value }) {
@@ -162,6 +189,11 @@ export default function PatientDetailView() {
     [patients, id]
   );
 
+  const emergencyContacts = useMemo(
+    () => getEmergencyContacts(patient),
+    [patient]
+  );
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-10">
@@ -268,22 +300,17 @@ export default function PatientDetailView() {
                 Contatos de emergencia
               </h2>
               <div className="grid gap-4 sm:grid-cols-2">
-                <DetailRow
-                  label="Contato 1"
-                  value={displayValue(patient.emergencyContact1Name)}
-                />
-                <PhoneDetailRow
-                  label="Telefone"
-                  value={patient.emergencyContact1Phone}
-                />
-                <DetailRow
-                  label="Contato 2"
-                  value={displayValue(patient.emergencyContact2Name)}
-                />
-                <PhoneDetailRow
-                  label="Telefone"
-                  value={patient.emergencyContact2Phone}
-                />
+                {emergencyContacts.length === 0 ? (
+                  <DetailRow label="Contatos" value="-" />
+                ) : (
+                  emergencyContacts.map((contact, index) => (
+                    <PhoneDetailRow
+                      key={`emergency-contact-${index}`}
+                      label={`Contato ${index + 1} - ${displayValue(contact.name)}`}
+                      value={contact.phone}
+                    />
+                  ))
+                )}
               </div>
             </section>
           </div>
