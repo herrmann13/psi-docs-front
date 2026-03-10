@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import usePatients from "../hooks/usePatients";
+import { showAlert } from "../utils/uiFeedback";
 
 const INITIAL_FORM = {
   name: "",
@@ -166,7 +167,7 @@ export default function PatientRegistrationView() {
       setForm(INITIAL_FORM);
       navigate("/");
     } catch (err) {
-      window.alert(err.message || "Erro ao salvar paciente.");
+      showAlert(err.message || "Erro ao salvar paciente.");
     }
   };
 

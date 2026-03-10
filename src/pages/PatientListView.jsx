@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import usePatients from "../hooks/usePatients";
+import { showAlert } from "../utils/uiFeedback";
 
 export default function PatientListView() {
   const [search, setSearch] = useState("");
@@ -46,7 +47,7 @@ export default function PatientListView() {
       try {
         parsed = JSON.parse(reader.result);
       } catch {
-        window.alert("Arquivo invalido: JSON mal formatado.");
+        showAlert("Arquivo invalido: JSON mal formatado.");
         return;
       }
 
@@ -61,14 +62,14 @@ export default function PatientListView() {
       );
 
       if (sanitized.length === 0) {
-        window.alert("Arquivo invalido: nenhum paciente valido encontrado.");
+        showAlert("Arquivo invalido: nenhum paciente valido encontrado.");
         return;
       }
 
       try {
         await mergePatients(sanitized);
       } catch (err) {
-        window.alert(err.message || "Erro ao importar pacientes.");
+        showAlert(err.message || "Erro ao importar pacientes.");
       }
     };
     reader.readAsText(file);

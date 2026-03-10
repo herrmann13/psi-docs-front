@@ -1,4 +1,5 @@
 import { STORAGE_TOKEN_KEY, STORAGE_USER_KEY } from "../../constants/auth";
+import { showAlert } from "../../utils/uiFeedback";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
@@ -60,9 +61,7 @@ const request = async (path, options = {}) => {
       window.dispatchEvent(new Event("auth:logout"));
     }
     const message = buildErrorMessage(data);
-    if (typeof window !== "undefined") {
-      window.alert(message);
-    }
+    showAlert(message);
     throw new Error(message);
   }
 

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CHARGE_STATUSES } from "../constants/charges";
 import { PAYMENT_METHODS } from "../constants/payments";
 import { chargesService } from "../services/api/charges";
 import { appointmentsService } from "../services/api/appointments";
 import usePatients from "../hooks/usePatients";
+import { showAlert } from "../utils/uiFeedback";
 
 const EMPTY_MANUAL_CHARGE = {
   appointmentId: "",
   originalAmount: "",
-  dueDate: "",
 };
 
 const EMPTY_PAYMENT = {
@@ -17,6 +17,11 @@ const EMPTY_PAYMENT = {
   paymentMethod: "PIX",
   paymentDate: "",
   notes: "",
+};
+
+const EMPTY_EDIT_CHARGE = {
+  chargeId: "",
+  originalAmount: "",
 };
 
 const toNumber = (value) => {
@@ -53,6 +58,16 @@ const formatDateTime = (value) => {
   return date.toLocaleString("pt-BR");
 };
 
+const formatTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const getChargeStatusLabel = (status) => {
   const labels = {
     PENDING: "Pendente",
@@ -78,13 +93,24 @@ const getChargeCardClasses = (status) => {
 };
 
 export default function FinanceView() {
+  const appointmentSelectorRef = useRef(null);
   const [charges, setCharges] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [manualChargeForm, setManualChargeForm] = useState(EMPTY_MANUAL_CHARGE);
+  const [appointmentSearch, setAppointmentSearch] = useState("");
+  const [isAppointmentListOpen, setIsAppointmentListOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT);
+  const [editChargeForm, setEditChargeForm] = useState(EMPTY_EDIT_CHARGE);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isEditChargeModalOpen, setIsEditChargeModalOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeletingCharge, setIsDeletingCharge] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { patients } = usePatients();
@@ -110,6 +136,21 @@ export default function FinanceView() {
     loadFinancialData();
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!isAppointmentListOpen) return;
+      if (
+        appointmentSelectorRef.current &&
+        !appointmentSelectorRef.current.contains(event.target)
+      ) {
+        setIsAppointmentListOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isAppointmentListOpen]);
+
   const appointmentById = useMemo(
     () => new Map(appointments.map((appointment) => [String(appointment.id), appointment])),
     [appointments]
@@ -127,8 +168,45 @@ export default function FinanceView() {
     return patient?.name || patient?.fullName || `Paciente ${patientId ?? "-"}`;
   };
 
+  const getAppointmentPatientName = (appointment) => {
+    const patient = patientById.get(String(appointment?.patientId));
+    return patient?.name || patient?.fullName || "Paciente";
+  };
+
+  const formatAppointmentOptionLabel = (appointment) => {
+    return `Atendimento ${formatDate(appointment?.startTime)} - ${formatTime(
+      appointment?.startTime
+    )} • ${getAppointmentPatientName(appointment)}`;
+  };
+
+  const selectedManualAppointment = useMemo(() => {
+    if (!manualChargeForm.appointmentId) return null;
+    return (
+      appointments.find(
+        (appointment) => String(appointment.id) === String(manualChargeForm.appointmentId)
+      ) || null
+    );
+  }, [appointments, manualChargeForm.appointmentId]);
+
+  const isSameMonth = (value, monthRef) => {
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    return (
+      date.getFullYear() === monthRef.getFullYear() &&
+      date.getMonth() === monthRef.getMonth()
+    );
+  };
+
+  const chargesInSelectedMonth = useMemo(() => {
+    return charges.filter((charge) => {
+      const appointment = appointmentById.get(String(charge.appointmentId));
+      return isSameMonth(appointment?.startTime, selectedMonth);
+    });
+  }, [charges, appointmentById, selectedMonth]);
+
   const totals = useMemo(() => {
-    return charges.reduce(
+    return chargesInSelectedMonth.reduce(
       (acc, charge) => {
         const original = Number(charge.originalAmount) || 0;
         const outstanding = Number(charge.outstandingAmount) || 0;
@@ -142,11 +220,40 @@ export default function FinanceView() {
       },
       { received: 0, pending: 0 }
     );
-  }, [charges]);
+  }, [chargesInSelectedMonth]);
+
+  const handleMonthChange = (delta) => {
+    setSelectedMonth((current) =>
+      new Date(current.getFullYear(), current.getMonth() + delta, 1)
+    );
+  };
+
+  const eligibleAppointments = useMemo(() => {
+    const blockedAppointments = new Set(
+      charges
+        .filter((charge) => charge.status !== "CANCELLED")
+        .map((charge) => String(charge.appointmentId))
+    );
+
+    return appointments
+      .filter((appointment) => appointment.status !== "CANCELLED")
+      .filter((appointment) => !blockedAppointments.has(String(appointment.id)))
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  }, [appointments, charges]);
+
+  const filteredEligibleAppointments = useMemo(() => {
+    const term = appointmentSearch.trim().toLowerCase();
+    if (!term) return eligibleAppointments;
+
+    return eligibleAppointments.filter((appointment) => {
+      const label = formatAppointmentOptionLabel(appointment).toLowerCase();
+      return label.includes(term);
+    });
+  }, [eligibleAppointments, appointmentSearch]);
 
   const filteredCharges = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return charges.filter((charge) => {
+    return chargesInSelectedMonth.filter((charge) => {
       if (statusFilter !== "ALL" && charge.status !== statusFilter) return false;
       if (!term) return true;
 
@@ -161,7 +268,7 @@ export default function FinanceView() {
         patientId.includes(term)
       );
     });
-  }, [charges, statusFilter, searchTerm, appointmentById, patientById]);
+  }, [chargesInSelectedMonth, statusFilter, searchTerm, appointmentById, patientById]);
 
   const handleManualChargeChange = (field) => (event) => {
     const { value } = event.target;
@@ -177,6 +284,11 @@ export default function FinanceView() {
     event.preventDefault();
     setError("");
 
+    if (!manualChargeForm.appointmentId) {
+      showAlert("Selecione uma consulta para criar a cobrança.");
+      return;
+    }
+
     const payload = {
       appointmentId: toNumber(manualChargeForm.appointmentId),
     };
@@ -185,17 +297,28 @@ export default function FinanceView() {
       payload.originalAmount = toNumber(manualChargeForm.originalAmount);
     }
 
-    if (manualChargeForm.dueDate) {
-      payload.dueDate = manualChargeForm.dueDate;
-    }
-
     try {
       await chargesService.create(payload);
       setManualChargeForm(EMPTY_MANUAL_CHARGE);
+      setAppointmentSearch("");
+      setIsAppointmentListOpen(false);
       await loadFinancialData();
     } catch (err) {
-      setError(err.message || "Erro ao criar cobranca manual.");
+      setError(err.message || "Erro ao criar cobrança manual.");
     }
+  };
+
+  const handleAppointmentSearchChange = (event) => {
+    const { value } = event.target;
+    setAppointmentSearch(value);
+    setManualChargeForm((current) => ({ ...current, appointmentId: "" }));
+    setIsAppointmentListOpen(true);
+  };
+
+  const handleSelectAppointment = (appointment) => {
+    setManualChargeForm((current) => ({ ...current, appointmentId: String(appointment.id) }));
+    setAppointmentSearch(formatAppointmentOptionLabel(appointment));
+    setIsAppointmentListOpen(false);
   };
 
   const handleOpenPaymentModal = (charge) => {
@@ -249,6 +372,77 @@ export default function FinanceView() {
     }
   };
 
+  const handleOpenEditChargeModal = (charge) => {
+    setEditChargeForm({
+      chargeId: String(charge.id),
+      originalAmount: String(charge.originalAmount ?? ""),
+    });
+    setIsEditChargeModalOpen(true);
+  };
+
+  const handleCloseEditChargeModal = () => {
+    setIsEditChargeModalOpen(false);
+    setEditChargeForm(EMPTY_EDIT_CHARGE);
+    setIsDeleteConfirmOpen(false);
+  };
+
+  const handleEditChargeAmountChange = (event) => {
+    const { value } = event.target;
+    setEditChargeForm((current) => ({ ...current, originalAmount: value }));
+  };
+
+  const handleEditChargeSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+
+    const chargeId = toNumber(editChargeForm.chargeId);
+    const originalAmount = toNumber(editChargeForm.originalAmount);
+
+    try {
+      const updatedCharge = await chargesService.update(chargeId, { originalAmount });
+      if (updatedCharge?.id) {
+        setCharges((current) =>
+          current.map((charge) =>
+            String(charge.id) === String(updatedCharge.id)
+              ? { ...charge, ...updatedCharge }
+              : charge
+          )
+        );
+      } else {
+        await loadFinancialData();
+      }
+      handleCloseEditChargeModal();
+    } catch (err) {
+      setError(err.message || "Erro ao atualizar valor da cobrança.");
+    }
+  };
+
+  const openDeleteConfirmModal = () => {
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const closeDeleteConfirmModal = () => {
+    setIsDeleteConfirmOpen(false);
+  };
+
+  const handleDeleteCharge = async () => {
+    const chargeId = toNumber(editChargeForm.chargeId);
+    if (!chargeId) return;
+
+    setError("");
+    setIsDeletingCharge(true);
+    try {
+      await chargesService.remove(chargeId);
+      setCharges((current) => current.filter((charge) => String(charge.id) !== String(chargeId)));
+      setIsDeleteConfirmOpen(false);
+      handleCloseEditChargeModal();
+    } catch (err) {
+      setError(err.message || "Erro ao excluir cobrança.");
+    } finally {
+      setIsDeletingCharge(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 sm:px-8 sm:py-10">
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -257,13 +451,35 @@ export default function FinanceView() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Financeiro
             </p>
-            <h1 className="text-xl font-semibold text-slate-900">Cobrancas e pagamentos</h1>
+            <h1 className="text-xl font-semibold text-slate-900">Cobranças e pagamentos</h1>
           </header>
+
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold text-slate-700">
+              Referência: {selectedMonth.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleMonthChange(-1)}
+                className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Mês anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMonthChange(1)}
+                className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Próximo mês
+              </button>
+            </div>
+          </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
-                Total recebido
+                Total recebido no mês
               </p>
               <p className="text-lg font-semibold text-emerald-700">
                 {formatCurrency(totals.received)}
@@ -271,7 +487,7 @@ export default function FinanceView() {
             </div>
             <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
-                Total pendente
+                Total pendente no mês
               </p>
               <p className="text-lg font-semibold text-amber-700">
                 {formatCurrency(totals.pending)}
@@ -287,19 +503,57 @@ export default function FinanceView() {
 
           <section className="mt-8 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Criar cobranca manual
+              Criar cobrança manual
             </h2>
             <form onSubmit={handleManualChargeSubmit} className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium text-slate-700">ID da consulta</label>
-                  <input
-                    type="number"
-                    required
-                    value={manualChargeForm.appointmentId}
-                    onChange={handleManualChargeChange("appointmentId")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
+                  <label className="text-sm font-medium text-slate-700">Consulta</label>
+                  <div className="relative" ref={appointmentSelectorRef}>
+                    <input
+                      type="text"
+                      value={
+                        manualChargeForm.appointmentId && selectedManualAppointment
+                          ? formatAppointmentOptionLabel(selectedManualAppointment)
+                          : appointmentSearch
+                      }
+                      onChange={handleAppointmentSearchChange}
+                      onFocus={() => setIsAppointmentListOpen(true)}
+                      placeholder="Buscar atendimento por data/hora/paciente"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    />
+
+                    {isAppointmentListOpen ? (
+                      <div className="absolute z-10 mt-2 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        {filteredEligibleAppointments.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-slate-500">
+                            Nenhuma consulta elegível encontrada.
+                          </div>
+                        ) : (
+                          filteredEligibleAppointments.map((appointment) => (
+                            <button
+                              type="button"
+                              key={appointment.id}
+                              onClick={() => handleSelectAppointment(appointment)}
+                              className="flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-slate-50"
+                            >
+                              <span className="text-sm font-semibold text-slate-900">
+                                Atendimento {formatDate(appointment.startTime)} - {formatTime(appointment.startTime)}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {getAppointmentPatientName(appointment)}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  {eligibleAppointments.length === 0 ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Não há consultas elegíveis para criar cobrança manual.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-700">Valor original (opcional)</label>
@@ -312,28 +566,19 @@ export default function FinanceView() {
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-700">Vencimento (opcional)</label>
-                  <input
-                    type="date"
-                    value={manualChargeForm.dueDate}
-                    onChange={handleManualChargeChange("dueDate")}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
-                  />
-                </div>
               </div>
               <button
                 type="submit"
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
               >
-                Criar cobranca
+                Criar cobrança
               </button>
             </form>
           </section>
 
           <section className="mt-10 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Cobrancas
+              Cobranças
             </h2>
 
             <div className="grid gap-3 sm:grid-cols-3">
@@ -361,12 +606,16 @@ export default function FinanceView() {
             {isLoading ? (
               <p className="text-sm text-slate-500">Carregando...</p>
             ) : filteredCharges.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhuma cobranca encontrada.</p>
+              <p className="text-sm text-slate-500">Nenhuma cobrança encontrada.</p>
             ) : (
               <div className="space-y-3">
                 {filteredCharges.map((charge) => {
                   const appointment = appointmentById.get(String(charge.appointmentId));
                   const canPay = charge.status !== "PAID" && charge.status !== "CANCELLED";
+                  const canEditAmount =
+                    charge.status === "PENDING" || charge.status === "PARTIALLY_PAID";
+                  const titleDate = formatDate(appointment?.startTime);
+                  const titleTime = formatTime(appointment?.startTime);
 
                   return (
                     <div
@@ -375,7 +624,9 @@ export default function FinanceView() {
                     >
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <p className="text-base font-semibold text-slate-900">Cobranca #{charge.id}</p>
+                          <p className="text-base font-semibold text-slate-900">
+                            Atendimento {titleDate} - {titleTime}
+                          </p>
                           <p className="text-sm text-slate-600">{resolvePatientName(charge)}</p>
                         </div>
                         <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -384,14 +635,12 @@ export default function FinanceView() {
                       </div>
 
                       <div className="mt-2 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
-                        <span>Consulta: #{charge.appointmentId}</span>
-                        <span>Data consulta: {formatDateTime(appointment?.startTime)}</span>
+                        <span>Data da consulta: {formatDateTime(appointment?.startTime)}</span>
                         <span>Valor original: {formatCurrency(charge.originalAmount)}</span>
                         <span>Saldo atual: {formatCurrency(charge.outstandingAmount)}</span>
-                        <span>Vencimento: {formatDate(charge.dueDate)}</span>
                       </div>
 
-                      <div className="mt-3">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           disabled={!canPay}
@@ -399,6 +648,14 @@ export default function FinanceView() {
                           className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Incluir pagamento
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canEditAmount}
+                          onClick={() => handleOpenEditChargeModal(charge)}
+                          className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Editar
                         </button>
                       </div>
                     </div>
@@ -414,7 +671,7 @@ export default function FinanceView() {
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 px-4">
           <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-900">Incluir pagamento</h3>
-            <p className="mt-1 text-sm text-slate-500">Cobranca #{paymentForm.chargeId}</p>
+            <p className="mt-1 text-sm text-slate-500">Cobrança #{paymentForm.chargeId}</p>
 
             <form onSubmit={handlePaymentSubmit} className="mt-4 space-y-4">
               <div>
@@ -431,7 +688,7 @@ export default function FinanceView() {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-slate-700">Metodo de pagamento</label>
+                <label className="text-sm font-medium text-slate-700">Método de pagamento</label>
                 <select
                   required
                   value={paymentForm.paymentMethod}
@@ -457,7 +714,7 @@ export default function FinanceView() {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-slate-700">Observacoes (opcional)</label>
+                <label className="text-sm font-medium text-slate-700">Observações (opcional)</label>
                 <textarea
                   rows={3}
                   value={paymentForm.notes}
@@ -482,6 +739,82 @@ export default function FinanceView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isEditChargeModalOpen ? (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Editar cobrança</h3>
+
+            <form onSubmit={handleEditChargeSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700">Novo valor</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={editChargeForm.originalAmount}
+                  onChange={handleEditChargeAmountChange}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={openDeleteConfirmModal}
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  Excluir cobrança
+                </button>
+                <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleCloseEditChargeModal}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                  Salvar
+                </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isDeleteConfirmOpen ? (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Excluir cobrança</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Tem certeza que deseja excluir esta cobrança? Essa ação não pode ser desfeita.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteConfirmModal}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCharge}
+                disabled={isDeletingCharge}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Excluir
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

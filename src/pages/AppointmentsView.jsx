@@ -4,17 +4,19 @@ import { appointmentsService } from "../services/api/appointments";
 import { chargesService } from "../services/api/charges";
 import usePatients from "../hooks/usePatients";
 import { useAuth } from "../contexts/AuthContext";
+import { showAlert, showConfirm } from "../utils/uiFeedback";
 
 const EMPTY_FORM = {
   id: "",
   patientId: "",
   status: "SCHEDULED",
+  appointmentDate: "",
   startTime: "",
   endTime: "",
   sessionValue: "",
 };
 
-const toInputDateTime = (value) => {
+const toInputDate = (value) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -22,14 +24,22 @@ const toInputDateTime = (value) => {
   const year = date.getFullYear();
   const month = pad(date.getMonth() + 1);
   const day = pad(date.getDate());
-  const hours = pad(date.getHours());
-  const minutes = pad(date.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  return `${year}-${month}-${day}`;
 };
 
-const toIso = (value) => {
-  if (!value) return null;
+const toInputTime = (value) => {
+  if (!value) return "";
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (num) => String(num).padStart(2, "0");
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${hours}:${minutes}`;
+};
+
+const mergeDateAndTimeToIso = (dateValue, timeValue) => {
+  if (!dateValue || !timeValue) return null;
+  const date = new Date(`${dateValue}T${timeValue}`);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
 };
@@ -90,19 +100,18 @@ const toTimeLabel = (value) => {
   });
 };
 
-const buildDefaultStartTime = (date) => {
+const buildDefaultAppointmentDate = (date) => {
   const pad = (num) => String(num).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate()
-  )}T09:00`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 
-const addOneHourToInputDateTime = (value) => {
-  if (!value) return "";
-  const date = new Date(value);
+const addOneHourToTime = (appointmentDate, timeValue) => {
+  if (!appointmentDate || !timeValue) return "";
+  const date = new Date(`${appointmentDate}T${timeValue}`);
   if (Number.isNaN(date.getTime())) return "";
   date.setHours(date.getHours() + 1);
-  return toInputDateTime(date);
+  const pad = (num) => String(num).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 const toInputValue = (value) => {
@@ -164,6 +173,9 @@ export default function AppointmentsView() {
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [isPatientListOpen, setIsPatientListOpen] = useState(false);
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+  const [rescheduleAppointment, setRescheduleAppointment] = useState(null);
+  const [rescheduleReason, setRescheduleReason] = useState("");
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -197,20 +209,21 @@ export default function AppointmentsView() {
     setForm((current) => ({
       ...current,
       startTime: value,
-      endTime: value ? addOneHourToInputDateTime(value) : "",
+      endTime: value ? addOneHourToTime(current.appointmentDate, value) : "",
     }));
   };
 
-  const buildCreateForm = (startTime = "") => ({
+  const buildCreateForm = (appointmentDate = "") => ({
     ...EMPTY_FORM,
-    startTime,
-    endTime: startTime ? addOneHourToInputDateTime(startTime) : "",
+    appointmentDate,
+    startTime: appointmentDate ? "09:00" : "",
+    endTime: appointmentDate ? addOneHourToTime(appointmentDate, "09:00") : "",
     sessionValue: toInputValue(user?.defaultSessionValue),
   });
 
   const openCreateForm = () => {
-    const nextStartTime = selectedDate ? buildDefaultStartTime(selectedDate) : "";
-    setForm(buildCreateForm(nextStartTime));
+    const nextDate = selectedDate ? buildDefaultAppointmentDate(selectedDate) : "";
+    setForm(buildCreateForm(nextDate));
     setPatientSearch("");
     setSelectedPatient(null);
     setIsPatientListOpen(false);
@@ -245,8 +258,9 @@ export default function AppointmentsView() {
       id: appointment.id || "",
       patientId: nextPatient ? nextPatient.id : appointment.patientId ?? "",
       status: appointment.status || "SCHEDULED",
-      startTime: toInputDateTime(appointment.startTime),
-      endTime: toInputDateTime(appointment.endTime),
+      appointmentDate: toInputDate(appointment.startTime),
+      startTime: toInputTime(appointment.startTime),
+      endTime: toInputTime(appointment.endTime),
       sessionValue: toInputValue(appointment.sessionValue),
     });
     setIsFormOpen(true);
@@ -257,17 +271,17 @@ export default function AppointmentsView() {
     setError("");
 
     if (!selectedPatient || !form.patientId) {
-      window.alert("Selecione um paciente valido.");
+      showAlert("Selecione um paciente valido.");
       return;
     }
 
-    if (!form.startTime || !form.endTime) {
-      window.alert("Preencha inicio e fim da consulta.");
+    if (!form.appointmentDate || !form.startTime || !form.endTime) {
+      showAlert("Preencha data, inicio e fim da consulta.");
       return;
     }
 
     if (form.sessionValue === "") {
-      window.alert("O valor da sessao e obrigatorio.");
+      showAlert("O valor da sessao e obrigatorio.");
       return;
     }
 
@@ -277,17 +291,17 @@ export default function AppointmentsView() {
     const parsedSessionValue = Number(form.sessionValue);
 
     if (Number.isNaN(parsedPsychologistId)) {
-      window.alert("Nao foi possivel identificar o psicologo logado.");
+      showAlert("Nao foi possivel identificar o psicologo logado.");
       return;
     }
 
     if (Number.isNaN(parsedPatientId)) {
-      window.alert("Selecione um paciente valido.");
+      showAlert("Selecione um paciente valido.");
       return;
     }
 
     if (Number.isNaN(parsedSessionValue)) {
-      window.alert("Informe um valor de sessao valido.");
+      showAlert("Informe um valor de sessao valido.");
       return;
     }
 
@@ -295,8 +309,8 @@ export default function AppointmentsView() {
       patientId: parsedPatientId,
       psychologistId: parsedPsychologistId,
       status: form.status || "SCHEDULED",
-      startTime: toIso(form.startTime),
-      endTime: toIso(form.endTime),
+      startTime: mergeDateAndTimeToIso(form.appointmentDate, form.startTime),
+      endTime: mergeDateAndTimeToIso(form.appointmentDate, form.endTime),
       sessionValue: parsedSessionValue,
     };
 
@@ -315,7 +329,7 @@ export default function AppointmentsView() {
 
   const handleDelete = async (id) => {
     if (!id) return;
-    const confirmDelete = window.confirm("Deseja remover esta consulta?");
+    const confirmDelete = await showConfirm("Deseja remover esta consulta?");
     if (!confirmDelete) return;
     setError("");
     try {
@@ -347,11 +361,26 @@ export default function AppointmentsView() {
   };
 
   const handleReschedule = (appointment) => {
-    const reason = window.prompt("Motivo do reagendamento?");
-    updateStatus(appointment, "SCHEDULED", {
+    setRescheduleAppointment(appointment);
+    setRescheduleReason("");
+    setIsRescheduleModalOpen(true);
+  };
+
+  const closeRescheduleModal = () => {
+    setIsRescheduleModalOpen(false);
+    setRescheduleAppointment(null);
+    setRescheduleReason("");
+  };
+
+  const handleRescheduleSubmit = (event) => {
+    event.preventDefault();
+    if (!rescheduleAppointment) return;
+
+    updateStatus(rescheduleAppointment, "SCHEDULED", {
       rescheduledAt: new Date().toISOString(),
-      rescheduleReason: reason || null,
+      rescheduleReason: rescheduleReason.trim() || null,
     });
+    closeRescheduleModal();
   };
 
   const handleGenerateCharge = async (appointment) => {
@@ -360,7 +389,7 @@ export default function AppointmentsView() {
       await chargesService.create({
         appointmentId: appointment.id,
       });
-      window.alert("Cobranca criada com sucesso.");
+      showAlert("Cobranca criada com sucesso.");
     } catch (err) {
       setError(err.message || "Erro ao gerar cobranca.");
     }
@@ -399,11 +428,12 @@ export default function AppointmentsView() {
     if (!date) return;
     setSelectedDate(date);
     if (isFormOpen && !form.id) {
-      const nextStartTime = buildDefaultStartTime(date);
+      const nextDate = buildDefaultAppointmentDate(date);
       setForm((current) => ({
         ...current,
-        startTime: nextStartTime,
-        endTime: addOneHourToInputDateTime(nextStartTime),
+        appointmentDate: nextDate,
+        startTime: current.startTime || "09:00",
+        endTime: addOneHourToTime(nextDate, current.startTime || "09:00"),
       }));
     }
   };
@@ -605,9 +635,19 @@ export default function AppointmentsView() {
                   ) : null}
                 </div>
                 <div>
+                  <label className="text-sm font-medium text-slate-700">Data</label>
+                  <input
+                    type="date"
+                    value={form.appointmentDate}
+                    onChange={handleChange("appointmentDate")}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                    required
+                  />
+                </div>
+                <div>
                   <label className="text-sm font-medium text-slate-700">Inicio</label>
                   <input
-                    type="datetime-local"
+                    type="time"
                     value={form.startTime}
                     onChange={handleStartTimeChange}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
@@ -617,7 +657,7 @@ export default function AppointmentsView() {
                 <div>
                   <label className="text-sm font-medium text-slate-700">Fim</label>
                   <input
-                    type="datetime-local"
+                    type="time"
                     value={form.endTime}
                     onChange={handleChange("endTime")}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
@@ -774,6 +814,45 @@ export default function AppointmentsView() {
           </div>
         </div>
       </div>
+
+      {isRescheduleModalOpen ? (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Reagendar consulta</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Informe o motivo do reagendamento.
+            </p>
+
+            <form onSubmit={handleRescheduleSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700">Motivo (opcional)</label>
+                <textarea
+                  rows={3}
+                  value={rescheduleReason}
+                  onChange={(event) => setRescheduleReason(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeRescheduleModal}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
