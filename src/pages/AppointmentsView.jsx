@@ -595,7 +595,9 @@ export default function AppointmentsView() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                 <div className="relative">
-                  <label className="text-sm font-medium text-slate-700">Paciente</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Paciente <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="text"
                     value={patientSearch}
@@ -635,7 +637,9 @@ export default function AppointmentsView() {
                   ) : null}
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Data</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Data <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="date"
                     value={form.appointmentDate}
@@ -645,7 +649,9 @@ export default function AppointmentsView() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Inicio</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Inicio <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="time"
                     value={form.startTime}
@@ -655,7 +661,9 @@ export default function AppointmentsView() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Fim</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Fim <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="time"
                     value={form.endTime}
@@ -665,7 +673,9 @@ export default function AppointmentsView() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Valor da sessao</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Valor da sessao <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="number"
                     step="0.01"

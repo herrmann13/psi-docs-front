@@ -184,7 +184,7 @@ export default function PatientRegistrationView() {
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Nome completo
+                Nome completo <span className="text-rose-600">*</span>
               </label>
               <input
                 type="text"

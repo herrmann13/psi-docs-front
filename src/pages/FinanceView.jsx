@@ -508,7 +508,9 @@ export default function FinanceView() {
             <form onSubmit={handleManualChargeSubmit} className="space-y-3">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Consulta</label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Consulta <span className="text-rose-600">*</span>
+                  </label>
                   <div className="relative" ref={appointmentSelectorRef}>
                     <input
                       type="text"
@@ -675,7 +677,9 @@ export default function FinanceView() {
 
             <form onSubmit={handlePaymentSubmit} className="mt-4 space-y-4">
               <div>
-                <label className="text-sm font-medium text-slate-700">Valor pago</label>
+                <label className="text-sm font-medium text-slate-700">
+                  Valor pago <span className="text-rose-600">*</span>
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -688,7 +692,9 @@ export default function FinanceView() {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-slate-700">Método de pagamento</label>
+                <label className="text-sm font-medium text-slate-700">
+                  Método de pagamento <span className="text-rose-600">*</span>
+                </label>
                 <select
                   required
                   value={paymentForm.paymentMethod}
@@ -750,7 +756,9 @@ export default function FinanceView() {
 
             <form onSubmit={handleEditChargeSubmit} className="mt-4 space-y-4">
               <div>
-                <label className="text-sm font-medium text-slate-700">Novo valor</label>
+                <label className="text-sm font-medium text-slate-700">
+                  Novo valor <span className="text-rose-600">*</span>
+                </label>
                 <input
                   type="number"
                   step="0.01"
