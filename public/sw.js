@@ -1,4 +1,4 @@
-const CACHE_NAME = 'psi-docs-cache-v2'
+const CACHE_NAME = 'psi-docs-cache-v3'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -24,6 +24,33 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+
+  const requestUrl = new URL(event.request.url)
+  const isPatientsListRequest = requestUrl.pathname === '/patients'
+
+  if (isPatientsListRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.ok) {
+            const responseClone = response.clone()
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone)
+            })
+          }
+          return response
+        })
+        .catch(async () => {
+          const cached = await caches.match(event.request)
+          if (cached) return cached
+          return new Response(JSON.stringify({ message: 'Sem internet e sem cache de pacientes.' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        })
+    )
+    return
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
