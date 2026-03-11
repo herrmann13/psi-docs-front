@@ -89,7 +89,14 @@ export default function PatientRegistrationView() {
     }
   }, [isEditing, existingPatient]);
 
-  const canSave = useMemo(() => form.name.trim().length > 0, [form.name]);
+  const canSave = useMemo(() => {
+    return (
+      form.name.trim().length > 0 &&
+      form.cpf.trim().length > 0 &&
+      form.birthDate.trim().length > 0 &&
+      form.phone.trim().length > 0
+    );
+  }, [form.name, form.cpf, form.birthDate, form.phone]);
 
   const handleChange = (field) => (event) => {
     const { value } = event.target;
@@ -139,7 +146,13 @@ export default function PatientRegistrationView() {
     event.preventDefault();
 
     const trimmedName = form.name.trim();
-    if (!trimmedName) return;
+    const trimmedCpf = form.cpf.trim();
+    const trimmedPhone = form.phone.trim();
+
+    if (!trimmedName || !trimmedCpf || !form.birthDate || !trimmedPhone) {
+      showAlert("Nome completo, CPF, data de nascimento e celular sao obrigatorios.");
+      return;
+    }
 
     const sanitizedContacts = form.emergencyContacts
       .map((contact) => ({
@@ -151,8 +164,8 @@ export default function PatientRegistrationView() {
     const payload = {
       ...form,
       name: trimmedName,
-      cpf: form.cpf.trim(),
-      phone: form.phone.trim(),
+      cpf: trimmedCpf,
+      phone: trimmedPhone,
       emergencyContacts: sanitizedContacts,
     };
 
@@ -193,12 +206,13 @@ export default function PatientRegistrationView() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 placeholder="Nome"
                 autoComplete="name"
+                required
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-slate-700">
-                CPF
+                CPF <span className="text-rose-600">*</span>
               </label>
               <input
                 type="text"
@@ -208,12 +222,13 @@ export default function PatientRegistrationView() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 placeholder="000.000.000-00"
                 autoComplete="off"
+                required
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Data de nascimento
+                Data de nascimento <span className="text-rose-600">*</span>
               </label>
               <input
                 type="date"
@@ -221,12 +236,13 @@ export default function PatientRegistrationView() {
                 onChange={handleChange("birthDate")}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 autoComplete="bday"
+                required
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Celular
+                Celular <span className="text-rose-600">*</span>
               </label>
               <input
                 type="tel"
@@ -236,6 +252,7 @@ export default function PatientRegistrationView() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
                 placeholder="Telefone"
                 autoComplete="tel"
+                required
               />
             </div>
 

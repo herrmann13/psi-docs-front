@@ -26,9 +26,10 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
 
   const requestUrl = new URL(event.request.url)
-  const isPatientsListRequest = requestUrl.pathname === '/patients'
+  const NETWORK_FIRST_PATHS = new Set(['/patients', '/appointments', '/charges'])
+  const isNetworkFirstRequest = NETWORK_FIRST_PATHS.has(requestUrl.pathname)
 
-  if (isPatientsListRequest) {
+  if (isNetworkFirstRequest) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -43,7 +44,7 @@ self.addEventListener('fetch', (event) => {
         .catch(async () => {
           const cached = await caches.match(event.request)
           if (cached) return cached
-          return new Response(JSON.stringify({ message: 'Sem internet e sem cache de pacientes.' }), {
+          return new Response(JSON.stringify({ message: 'Sem internet e sem cache local para esta listagem.' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
