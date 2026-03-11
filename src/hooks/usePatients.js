@@ -151,6 +151,21 @@ export default function usePatients() {
     []
   );
 
+  const removePatient = useCallback(async (id) => {
+    setError("");
+    try {
+      await patientsService.remove(id);
+      setPatients((current) => {
+        const next = current.filter((patient) => String(patient.id) !== String(id));
+        savePatientsCache(next);
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || "Erro ao remover paciente.");
+      throw err;
+    }
+  }, []);
+
   const mergePatients = useCallback(
     async (incoming) => {
       if (!Array.isArray(incoming) || incoming.length === 0) return;
@@ -179,13 +194,14 @@ export default function usePatients() {
       patients,
       addPatient,
       updatePatient,
+      removePatient,
       mergePatients,
       isLoading,
       isOffline,
       error,
       refreshPatients,
     }),
-    [patients, addPatient, updatePatient, mergePatients, isLoading, isOffline, error, refreshPatients]
+    [patients, addPatient, updatePatient, removePatient, mergePatients, isLoading, isOffline, error, refreshPatients]
   );
 
   return value;

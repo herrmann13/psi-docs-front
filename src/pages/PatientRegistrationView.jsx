@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import usePatients from "../hooks/usePatients";
-import { showAlert } from "../utils/uiFeedback";
+import { showAlert, showConfirm } from "../utils/uiFeedback";
 
 const INITIAL_FORM = {
   name: "",
@@ -55,7 +55,7 @@ const formatPhone = (value) => {
 export default function PatientRegistrationView() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { addPatient, updatePatient, patients } = usePatients();
+  const { addPatient, updatePatient, removePatient, patients } = usePatients();
   const [form, setForm] = useState(INITIAL_FORM);
   const isEditing = Boolean(id);
 
@@ -184,14 +184,37 @@ export default function PatientRegistrationView() {
     }
   };
 
+  const handleDeletePatient = async () => {
+    if (!existingPatient?.id) return;
+
+    const confirmDelete = await showConfirm("Deseja excluir este paciente?");
+    if (!confirmDelete) return;
+
+    try {
+      await removePatient(existingPatient.id);
+      navigate("/");
+    } catch (err) {
+      showAlert(err.message || "Erro ao remover paciente.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-10">
       <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="rounded-xl bg-white p-6 shadow-sm sm:p-8">
-          <header className="mb-6">
+          <header className="mb-6 flex items-center justify-between gap-3">
             <h1 className="text-medium font-semibold uppercase tracking-wide text-slate-900">
               {isEditing ? "Editar paciente" : "Cadastro de paciente"}
             </h1>
+            {isEditing ? (
+              <button
+                type="button"
+                onClick={handleDeletePatient}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+              >
+                Excluir
+              </button>
+            ) : null}
           </header>
 
           <form className="space-y-4" onSubmit={handleSubmit}>
