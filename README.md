@@ -29,6 +29,9 @@ Sistema web para gestão clínica de psicólogos, com foco em pacientes, agenda 
 
 - Visualização em calendário mensal.
 - Criação, edição e exclusão de consultas.
+- Escolha entre cadastro de consulta única e plano de consultas.
+- Criação de plano de consultas com quantidade de sessões e intervalo em dias.
+- Pré-visualização automática das consultas do plano com edição individual por item.
 - Seleção de paciente por busca (nome/CPF) dentro do formulário da consulta.
 - Definição de data, horário inicial/final, status e valor da sessão.
 - Reagendamento com registro de motivo.

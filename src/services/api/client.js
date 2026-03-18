@@ -23,6 +23,27 @@ const buildErrorMessage = (data) => {
   if (!data) return "Erro ao comunicar com o servidor.";
   if (typeof data === "string") return data;
 
+  const errorCode = data.code;
+  const codeMessages = {
+    INVALID_APPOINTMENT_INTERVAL:
+      "Intervalo de consulta invalido. Verifique se o inicio e menor que o fim.",
+    APPOINTMENT_PATIENT_MISMATCH:
+      "Todas as consultas do plano devem ser do mesmo paciente selecionado.",
+    APPOINTMENT_SERIES_CREATE_REQUIRES_SERIES_ENDPOINT:
+      "Consultas vinculadas a plano devem ser criadas pelo fluxo de plano de consultas.",
+    APPOINTMENT_SERIES_PATIENT_IMMUTABLE:
+      "Nao e permitido trocar o paciente de consulta vinculada a plano.",
+    APPOINTMENT_SERIES_ASSOCIATION_IMMUTABLE:
+      "Nao e permitido alterar a associacao de uma consulta com plano.",
+    FORBIDDEN_PATIENT_OWNER:
+      "Voce nao tem permissao para usar esse paciente.",
+    FORBIDDEN_APPOINTMENT_OWNER:
+      "Voce nao tem permissao para operar sobre esta consulta.",
+  };
+  if (errorCode && codeMessages[errorCode]) {
+    return codeMessages[errorCode];
+  }
+
   const baseMessage = data.message || "Erro ao comunicar com o servidor.";
   const fieldErrors = data?.errors?.fieldErrors;
 
