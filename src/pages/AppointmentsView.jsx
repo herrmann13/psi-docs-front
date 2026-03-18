@@ -207,15 +207,22 @@ const mergeAppointmentsFromSources = (appointmentsData, seriesData) => {
       series.appointments.forEach((appointment) => {
         if (!appointment?.id) return;
         const id = String(appointment.id);
+        const seriesAppointmentId =
+          appointment.appointmentSeriesId ?? appointment.appointment_series_id ?? series.id ?? null;
         const nextAppointment = {
           ...appointment,
-          appointmentSeriesId: appointment.appointmentSeriesId ?? series.id ?? null,
+          appointmentSeriesId: seriesAppointmentId,
         };
         if (!mergedById.has(id)) {
           mergedById.set(id, nextAppointment);
           return;
         }
-        mergedById.set(id, { ...mergedById.get(id), ...nextAppointment });
+
+        const currentAppointment = mergedById.get(id);
+        mergedById.set(id, {
+          ...currentAppointment,
+          appointmentSeriesId: currentAppointment.appointmentSeriesId ?? seriesAppointmentId,
+        });
       });
     });
   }
