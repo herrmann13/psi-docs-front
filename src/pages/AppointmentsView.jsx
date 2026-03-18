@@ -847,9 +847,9 @@ export default function AppointmentsView() {
                       type="button"
                       key={dateKey}
                       onClick={() => handleSelectDate(date)}
-                      className={`h-24 rounded-lg border px-2 py-2 text-left text-xs transition focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                      className={`calendar-day-button h-24 rounded-lg border px-2 py-2 text-left text-xs transition focus:outline-none focus:ring-2 focus:ring-slate-400 ${
                         isSelected
-                          ? "border-slate-900 bg-slate-900 text-white"
+                          ? "calendar-day-button-selected border-slate-900 bg-slate-900 text-white"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       }`}
                     >
@@ -858,7 +858,7 @@ export default function AppointmentsView() {
                         {items.slice(0, 2).map((item) => (
                           <div
                             key={item.id}
-                            className={`truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            className={`calendar-event-chip truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                               getStatusColorClasses(item.status).calendar
                             }`}
                           >
@@ -890,7 +890,7 @@ export default function AppointmentsView() {
                     <button
                       type="button"
                       onClick={() => openCreateMode(CREATE_MODE_SINGLE)}
-                      className="rounded-lg border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      className="appointment-option-card rounded-lg border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
                     >
                       <p className="text-sm font-semibold text-slate-900">Consulta unica</p>
                       <p className="mt-1 text-xs text-slate-500">Fluxo tradicional de cadastro</p>
@@ -898,7 +898,7 @@ export default function AppointmentsView() {
                     <button
                       type="button"
                       onClick={() => openCreateMode(CREATE_MODE_SERIES)}
-                      className="rounded-lg border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      className="appointment-option-card rounded-lg border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
                     >
                       <p className="text-sm font-semibold text-slate-900">Plano de consultas</p>
                       <p className="mt-1 text-xs text-slate-500">Gera varias consultas com intervalo fixo</p>

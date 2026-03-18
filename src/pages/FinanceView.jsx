@@ -673,7 +673,7 @@ export default function FinanceView() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
+            <div className="finance-summary-card rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
                 Total recebido no mês
               </p>
@@ -681,7 +681,7 @@ export default function FinanceView() {
                 {formatCurrency(totals.received)}
               </p>
             </div>
-            <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
+            <div className="finance-summary-card rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
                 Total pendente no mês
               </p>
@@ -819,7 +819,7 @@ export default function FinanceView() {
                   return (
                     <div
                       key={charge.id}
-                      className={`rounded-lg border p-4 ${getChargeCardClasses(charge.status)}`}
+                      className={`finance-charge-card rounded-lg border p-4 ${getChargeCardClasses(charge.status)}`}
                     >
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
@@ -831,7 +831,7 @@ export default function FinanceView() {
                             <p className="text-xs text-slate-500">Cobranca vinculada a plano de consultas</p>
                           ) : null}
                         </div>
-                        <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700">
+                        <span className="finance-status-badge rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700">
                           {getChargeStatusLabel(charge.status)}
                         </span>
                       </div>

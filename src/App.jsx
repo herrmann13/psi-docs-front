@@ -10,13 +10,26 @@ import { useAuth } from "./contexts/AuthContext";
 import { usersService } from "./services/api/users";
 import { showAlert } from "./utils/uiFeedback";
 
-function TopBar() {
+const THEME_STORAGE_KEY = "psi-docs-theme";
+const LIGHT_THEME = "light";
+const DARK_THEME = "dark";
+
+const readStoredTheme = () => {
+  const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (storedTheme === LIGHT_THEME || storedTheme === DARK_THEME) {
+    return storedTheme;
+  }
+  return LIGHT_THEME;
+};
+
+function TopBar({ currentTheme, onThemeChange }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, logout, user, updateUser } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsValue, setSettingsValue] = useState("");
+  const [settingsTheme, setSettingsTheme] = useState(currentTheme);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   useEffect(() => {
@@ -46,6 +59,7 @@ function TopBar() {
         ? ""
         : String(user.defaultSessionValue)
     );
+    setSettingsTheme(currentTheme);
     setIsSettingsOpen(true);
     setIsMobileMenuOpen(false);
   };
@@ -53,6 +67,7 @@ function TopBar() {
   const closeSettings = () => {
     setIsSettingsOpen(false);
     setSettingsValue("");
+    setSettingsTheme(currentTheme);
   };
 
   const handleSaveUserSettings = async (event) => {
@@ -75,12 +90,18 @@ function TopBar() {
       return;
     }
 
+    if (settingsTheme !== LIGHT_THEME && settingsTheme !== DARK_THEME) {
+      showAlert("Selecione um tema válido.");
+      return;
+    }
+
     setIsSavingSettings(true);
     try {
+      onThemeChange(settingsTheme);
       const updatedUser = await usersService.updateDefaultSessionValue(user.id, parsedValue);
       updateUser(updatedUser || { ...user, defaultSessionValue: parsedValue });
       closeSettings();
-      showAlert("Valor padrão da sessão atualizado.");
+      showAlert("Configurações atualizadas.");
     } catch {
       // erro tratado globalmente no apiClient
     } finally {
@@ -247,6 +268,18 @@ function TopBar() {
                 />
               </div>
 
+              <div>
+                <label className="text-sm font-medium text-slate-700">Tema da aplicação</label>
+                <select
+                  value={settingsTheme}
+                  onChange={(event) => setSettingsTheme(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  <option value={LIGHT_THEME}>Claro</option>
+                  <option value={DARK_THEME}>Escuro</option>
+                </select>
+              </div>
+
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
@@ -293,10 +326,16 @@ export default function App() {
 function AppLayout() {
   const location = useLocation();
   const hideTopBar = location.pathname === "/login";
+  const [theme, setTheme] = useState(() => readStoredTheme());
+
+  useEffect(() => {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+    document.documentElement.classList.toggle("theme-dark", theme === DARK_THEME);
+  }, [theme]);
 
   return (
     <>
-      {!hideTopBar && <TopBar />}
+      {!hideTopBar && <TopBar currentTheme={theme} onThemeChange={setTheme} />}
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route

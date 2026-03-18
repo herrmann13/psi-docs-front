@@ -15,6 +15,7 @@ Sistema web para gestão clínica de psicólogos, com foco em pacientes, agenda 
 - Rotas protegidas com redirecionamento automático para `/login` quando não autenticado.
 - Logout pelo menu e logout automático em respostas `401` da API.
 - Configuração do valor padrão da sessão por usuário no topo da aplicação.
+- Alternância de tema claro/escuro em Configurações (preferência salva localmente).
 
 ### 2) Gestão de pacientes
 
