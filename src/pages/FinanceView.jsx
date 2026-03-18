@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CHARGE_STATUSES } from "../constants/charges";
 import { PAYMENT_METHODS } from "../constants/payments";
+import { appointmentSeriesService } from "../services/api/appointmentSeries";
 import { chargesService } from "../services/api/charges";
 import { appointmentsService } from "../services/api/appointments";
 import usePatients from "../hooks/usePatients";
@@ -22,6 +23,44 @@ const EMPTY_PAYMENT = {
 const EMPTY_EDIT_CHARGE = {
   chargeId: "",
   originalAmount: "",
+};
+
+const EMPTY_PLAN_PAYMENT = {
+  paymentMethod: "PIX",
+  paymentDate: "",
+  notes: "",
+};
+
+const mergeAppointmentsFromSources = (appointmentsData, seriesData) => {
+  const mergedById = new Map();
+
+  if (Array.isArray(appointmentsData)) {
+    appointmentsData.forEach((appointment) => {
+      if (!appointment?.id) return;
+      mergedById.set(String(appointment.id), appointment);
+    });
+  }
+
+  if (Array.isArray(seriesData)) {
+    seriesData.forEach((series) => {
+      if (!Array.isArray(series?.appointments)) return;
+      series.appointments.forEach((appointment) => {
+        if (!appointment?.id) return;
+        const id = String(appointment.id);
+        const nextAppointment = {
+          ...appointment,
+          appointmentSeriesId: appointment.appointmentSeriesId ?? series.id ?? null,
+        };
+        if (!mergedById.has(id)) {
+          mergedById.set(id, nextAppointment);
+          return;
+        }
+        mergedById.set(id, { ...mergedById.get(id), ...nextAppointment });
+      });
+    });
+  }
+
+  return [...mergedById.values()];
 };
 
 const toNumber = (value) => {
@@ -100,8 +139,13 @@ export default function FinanceView() {
   const [appointmentSearch, setAppointmentSearch] = useState("");
   const [isAppointmentListOpen, setIsAppointmentListOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT);
+  const [planPaymentForm, setPlanPaymentForm] = useState(EMPTY_PLAN_PAYMENT);
   const [editChargeForm, setEditChargeForm] = useState(EMPTY_EDIT_CHARGE);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isPlanPaymentModalOpen, setIsPlanPaymentModalOpen] = useState(false);
+  const [selectedPlanSeriesId, setSelectedPlanSeriesId] = useState(null);
+  const [selectedPlanChargeIds, setSelectedPlanChargeIds] = useState([]);
+  const [isSavingPlanPayment, setIsSavingPlanPayment] = useState(false);
   const [isEditChargeModalOpen, setIsEditChargeModalOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDeletingCharge, setIsDeletingCharge] = useState(false);
@@ -119,12 +163,18 @@ export default function FinanceView() {
     setIsLoading(true);
     setError("");
     try {
-      const [chargesData, appointmentsData] = await Promise.all([
+      const [chargesData, appointmentsData, seriesData] = await Promise.all([
         chargesService.list(),
         appointmentsService.list(),
+        appointmentSeriesService.list(),
       ]);
       setCharges(Array.isArray(chargesData) ? chargesData : []);
-      setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
+      setAppointments(
+        mergeAppointmentsFromSources(
+          Array.isArray(appointmentsData) ? appointmentsData : [],
+          Array.isArray(seriesData) ? seriesData : []
+        )
+      );
     } catch (err) {
       setError(err.message || "Erro ao carregar financeiro.");
     } finally {
@@ -160,6 +210,39 @@ export default function FinanceView() {
     () => new Map(patients.map((patient) => [String(patient.id), patient])),
     [patients]
   );
+
+  const resolveAppointmentSeriesId = (charge) => {
+    const appointment = appointmentById.get(String(charge?.appointmentId));
+    return appointment?.appointmentSeriesId || null;
+  };
+
+  const planPaymentCharges = useMemo(() => {
+    if (!selectedPlanSeriesId) return [];
+    return charges
+      .filter((charge) => {
+        const appointment = appointmentById.get(String(charge.appointmentId));
+        const sameSeries =
+          String(appointment?.appointmentSeriesId || "") === String(selectedPlanSeriesId);
+        const canPay = charge.status === "PENDING" || charge.status === "PARTIALLY_PAID";
+        return sameSeries && canPay;
+      })
+      .sort((a, b) => {
+        const appointmentA = appointmentById.get(String(a.appointmentId));
+        const appointmentB = appointmentById.get(String(b.appointmentId));
+        return new Date(appointmentA?.startTime || 0).getTime() - new Date(appointmentB?.startTime || 0).getTime();
+      });
+  }, [charges, appointmentById, selectedPlanSeriesId]);
+
+  const selectedPlanCharges = useMemo(() => {
+    const selectedSet = new Set(selectedPlanChargeIds.map(String));
+    return planPaymentCharges.filter((charge) => selectedSet.has(String(charge.id)));
+  }, [planPaymentCharges, selectedPlanChargeIds]);
+
+  const selectedPlanTotal = useMemo(() => {
+    return selectedPlanCharges.reduce((acc, charge) => {
+      return acc + (Number(charge.outstandingAmount) || 0);
+    }, 0);
+  }, [selectedPlanCharges]);
 
   const resolvePatientName = (charge) => {
     const appointment = appointmentById.get(String(charge.appointmentId));
@@ -280,6 +363,11 @@ export default function FinanceView() {
     setPaymentForm((current) => ({ ...current, [field]: value }));
   };
 
+  const handlePlanPaymentChange = (field) => (event) => {
+    const { value } = event.target;
+    setPlanPaymentForm((current) => ({ ...current, [field]: value }));
+  };
+
   const handleManualChargeSubmit = async (event) => {
     event.preventDefault();
     setError("");
@@ -335,6 +423,50 @@ export default function FinanceView() {
     setPaymentForm(EMPTY_PAYMENT);
   };
 
+  const handleOpenPlanPaymentModal = (charge) => {
+    const seriesId = resolveAppointmentSeriesId(charge);
+    if (!seriesId) {
+      showAlert("Esta cobranca nao pertence a um plano de consultas.");
+      return;
+    }
+
+    const chargeIds = charges
+      .filter((item) => {
+        const sameSeries = String(resolveAppointmentSeriesId(item) || "") === String(seriesId);
+        const canPay = item.status === "PENDING" || item.status === "PARTIALLY_PAID";
+        return sameSeries && canPay;
+      })
+      .map((item) => String(item.id));
+
+    if (chargeIds.length === 0) {
+      showAlert("Este plano nao possui cobrancas pendentes para pagamento.");
+      return;
+    }
+
+    setSelectedPlanSeriesId(seriesId);
+    setSelectedPlanChargeIds(chargeIds);
+    setPlanPaymentForm(EMPTY_PLAN_PAYMENT);
+    setIsPlanPaymentModalOpen(true);
+  };
+
+  const handleClosePlanPaymentModal = () => {
+    setIsPlanPaymentModalOpen(false);
+    setSelectedPlanSeriesId(null);
+    setSelectedPlanChargeIds([]);
+    setPlanPaymentForm(EMPTY_PLAN_PAYMENT);
+    setIsSavingPlanPayment(false);
+  };
+
+  const handleTogglePlanCharge = (chargeId) => {
+    setSelectedPlanChargeIds((current) => {
+      const key = String(chargeId);
+      if (current.includes(key)) {
+        return current.filter((id) => id !== key);
+      }
+      return [...current, key];
+    });
+  };
+
   const handlePaymentSubmit = async (event) => {
     event.preventDefault();
     setError("");
@@ -369,6 +501,70 @@ export default function FinanceView() {
       handleClosePaymentModal();
     } catch (err) {
       setError(err.message || "Erro ao registrar pagamento.");
+    }
+  };
+
+  const handlePlanPaymentSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+
+    if (!selectedPlanSeriesId) {
+      showAlert("Nao foi possivel identificar o plano selecionado.");
+      return;
+    }
+
+    if (selectedPlanChargeIds.length === 0) {
+      showAlert("Selecione ao menos uma cobranca para registrar o pagamento do plano.");
+      return;
+    }
+
+    const selectedSet = new Set(selectedPlanChargeIds.map(String));
+    const chargeIds = planPaymentCharges
+      .filter((charge) => selectedSet.has(String(charge.id)))
+      .map((charge) => toNumber(charge.id))
+      .filter((id) => id !== null);
+
+    if (chargeIds.length === 0) {
+      showAlert("As cobrancas selecionadas nao estao mais disponiveis para pagamento.");
+      return;
+    }
+
+    const paymentDate = planPaymentForm.paymentDate ? toIso(planPaymentForm.paymentDate) : null;
+
+    setIsSavingPlanPayment(true);
+
+    try {
+      const payload = {
+        chargeIds,
+        paymentMethod: planPaymentForm.paymentMethod,
+        notes: planPaymentForm.notes.trim(),
+      };
+
+      if (paymentDate) {
+        payload.paymentDate = paymentDate;
+      }
+
+      const result = await appointmentSeriesService.addPayments(selectedPlanSeriesId, payload);
+      const processedCount = Array.isArray(result?.processedCharges)
+        ? result.processedCharges.length
+        : chargeIds.length;
+      const totalAmountPaid = result?.totalAmountPaid;
+
+      await loadFinancialData();
+      handleClosePlanPaymentModal();
+      showAlert(
+        totalAmountPaid
+          ? `Pagamento do plano registrado com sucesso em ${processedCount} cobranca${
+              processedCount === 1 ? "" : "s"
+            }. Total pago: ${formatCurrency(totalAmountPaid)}.`
+          : `Pagamento do plano registrado com sucesso em ${processedCount} cobranca${
+              processedCount === 1 ? "" : "s"
+            }.`
+      );
+    } catch (err) {
+      await loadFinancialData();
+      handleClosePlanPaymentModal();
+      setError(err.message || "Erro ao registrar pagamento do plano.");
     }
   };
 
@@ -613,6 +809,7 @@ export default function FinanceView() {
               <div className="space-y-3">
                 {filteredCharges.map((charge) => {
                   const appointment = appointmentById.get(String(charge.appointmentId));
+                  const appointmentSeriesId = appointment?.appointmentSeriesId || null;
                   const canPay = charge.status !== "PAID" && charge.status !== "CANCELLED";
                   const canEditAmount =
                     charge.status === "PENDING" || charge.status === "PARTIALLY_PAID";
@@ -630,6 +827,9 @@ export default function FinanceView() {
                             Atendimento {titleDate} - {titleTime}
                           </p>
                           <p className="text-sm text-slate-600">{resolvePatientName(charge)}</p>
+                          {appointmentSeriesId ? (
+                            <p className="text-xs text-slate-500">Cobranca vinculada a plano de consultas</p>
+                          ) : null}
                         </div>
                         <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700">
                           {getChargeStatusLabel(charge.status)}
@@ -651,6 +851,16 @@ export default function FinanceView() {
                         >
                           Incluir pagamento
                         </button>
+                        {appointmentSeriesId ? (
+                          <button
+                            type="button"
+                            disabled={!canPay}
+                            onClick={() => handleOpenPlanPaymentModal(charge)}
+                            className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Incluir pagamento de plano
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           disabled={!canEditAmount}
@@ -742,6 +952,116 @@ export default function FinanceView() {
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 >
                   Salvar pagamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isPlanPaymentModalOpen ? (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Incluir pagamento de plano</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Selecione as cobrancas do plano que devem ser quitadas.
+            </p>
+
+            <form onSubmit={handlePlanPaymentSubmit} className="mt-4 space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Cobrancas selecionadas
+                </p>
+                <p className="mt-1 text-sm text-slate-700">
+                  {selectedPlanCharges.length} cobranca{selectedPlanCharges.length === 1 ? "" : "s"} • Total {" "}
+                  {formatCurrency(selectedPlanTotal)}
+                </p>
+              </div>
+
+              <div className="max-h-72 space-y-2 overflow-auto rounded-lg border border-slate-200 p-3">
+                {planPaymentCharges.length === 0 ? (
+                  <p className="text-sm text-slate-500">Nenhuma cobranca disponivel para este plano.</p>
+                ) : (
+                  planPaymentCharges.map((charge) => {
+                    const appointment = appointmentById.get(String(charge.appointmentId));
+                    const isSelected = selectedPlanChargeIds.includes(String(charge.id));
+                    return (
+                      <label
+                        key={charge.id}
+                        className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleTogglePlanCharge(charge.id)}
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold text-slate-900">
+                            Atendimento {formatDate(appointment?.startTime)} - {formatTime(appointment?.startTime)}
+                          </span>
+                          <span className="block text-xs text-slate-600">
+                            {resolvePatientName(charge)} • Saldo: {formatCurrency(charge.outstandingAmount)}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Metodo de pagamento <span className="text-rose-600">*</span>
+                </label>
+                <select
+                  required
+                  value={planPaymentForm.paymentMethod}
+                  onChange={handlePlanPaymentChange("paymentMethod")}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  {PAYMENT_METHODS.map((method) => (
+                    <option key={`plan-${method}`} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Data do pagamento (opcional)</label>
+                <input
+                  type="datetime-local"
+                  value={planPaymentForm.paymentDate}
+                  onChange={handlePlanPaymentChange("paymentDate")}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Observacoes (opcional)</label>
+                <textarea
+                  rows={3}
+                  value={planPaymentForm.notes}
+                  onChange={handlePlanPaymentChange("notes")}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleClosePlanPaymentModal}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPlanPayment}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Salvar pagamento do plano
                 </button>
               </div>
             </form>

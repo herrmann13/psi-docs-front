@@ -45,6 +45,7 @@ Sistema web para gestão clínica de psicólogos, com foco em pacientes, agenda 
 - Filtros por status e busca textual.
 - Criação de cobrança manual a partir de consultas elegíveis.
 - Registro de pagamento em cobrança (`chargesService.addPayment`) com método, data e observações.
+- Registro de pagamento de plano: seleção de múltiplas cobranças do mesmo plano em um único fluxo visual com envio em lote para o backend.
 - Edição do valor da cobrança e exclusão com confirmação.
 
 ### 5) Base técnica da aplicação

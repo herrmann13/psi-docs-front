@@ -14,4 +14,5 @@ export const appointmentSeriesService = {
   list: (params) => apiClient.get(`/appointment-series${buildQuery(params)}`),
   getById: (id) => apiClient.get(`/appointment-series?id=${id}`),
   create: (data) => apiClient.post("/appointment-series", data),
+  addPayments: (id, data) => apiClient.post(`/appointment-series/${id}/payments`, data),
 };
